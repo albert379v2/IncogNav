@@ -1,0 +1,1807 @@
+package com.example
+
+import android.annotation.SuppressLint
+import android.app.Application
+import android.graphics.Bitmap
+import android.os.Bundle
+import android.webkit.CookieManager
+import android.webkit.HttpAuthHandler
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import com.example.data.BrowserProfile
+import com.example.data.ProfileBookmark
+import com.example.data.ProfileHistory
+import com.example.ui.BrowserViewModel
+import com.example.ui.theme.*
+import com.example.util.FingerprintSpoofer
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+
+class MainActivity : ComponentActivity() {
+
+    private val viewModel: BrowserViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            MyApplicationTheme {
+                MainBrowserScreen(viewModel)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainBrowserScreen(viewModel: BrowserViewModel) {
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    
+    val profiles by viewModel.allProfiles.collectAsStateWithLifecycle(initialValue = emptyList())
+    val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
+    val history by viewModel.activeHistoryList.collectAsStateWithLifecycle()
+    val bookmarks by viewModel.activeBookmarksList.collectAsStateWithLifecycle()
+    
+    val urlText by viewModel.currentUrlText.collectAsStateWithLifecycle()
+    val isPageLoading by viewModel.isPageLoading.collectAsStateWithLifecycle()
+    val loadingProgress by viewModel.loadingProgress.collectAsStateWithLifecycle()
+
+    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var showCreateProfileDialog by remember { mutableStateOf(false) }
+    var showProtectionShieldDialog by remember { mutableStateOf(false) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var showBookmarksDialog by remember { mutableStateOf(false) }
+
+    // Navigation trigger observer
+    LaunchedEffect(key1 = true) {
+        viewModel.navigationTrigger.collectLatest { targetUrl ->
+            webViewInstance?.loadUrl(targetUrl)
+        }
+    }
+
+    // Set user agent and start-of-document scripts whenever active Profile changes
+    LaunchedEffect(activeProfile) {
+        activeProfile?.let { p ->
+            webViewInstance?.let { webView ->
+                val targetUa = FingerprintSpoofer.getProfileUserAgent(p)
+                webView.settings.userAgentString = targetUa
+
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                    val script = FingerprintSpoofer.getSpoofingScript(p)
+                    // Allowed rules set for all origins to enable global antidetect spoofing
+                    WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+                }
+            }
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = PremiumVoid,
+                modifier = Modifier.width(320.dp)
+            ) {
+                DrawerProfilePanel(
+                    profiles = profiles,
+                    activeProfile = activeProfile,
+                    onSelectProfile = { id ->
+                        webViewInstance?.let { webView ->
+                            webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
+                                val cleanJson = sanitizeJsStringResult(result)
+                                viewModel.updateActiveProfileLocalStorage(cleanJson)
+                                viewModel.selectProfile(id)
+                            }
+                        } ?: run {
+                            viewModel.selectProfile(id)
+                        }
+                        scope.launch { drawerState.close() }
+                    },
+                    onCreateProfileClick = {
+                        showCreateProfileDialog = true
+                    },
+                    onDeleteProfileClick = { profile ->
+                        viewModel.deleteProfile(profile)
+                    }
+                )
+            }
+        }
+    ) {
+        val currentProfile = activeProfile
+        if (currentProfile == null) {
+            DashboardScreen(
+                profiles = profiles,
+                onSelectProfile = { id ->
+                    viewModel.selectProfile(id)
+                },
+                onCreateProfileClick = {
+                    showCreateProfileDialog = true
+                },
+                onOpenDrawerClick = {
+                    scope.launch { drawerState.open() }
+                },
+                onDeleteProfile = { profile ->
+                    viewModel.deleteProfile(profile)
+                }
+            )
+        } else {
+            Scaffold(
+                topBar = {
+                    Column(
+                    modifier = Modifier
+                        .background(PremiumVoid)
+                        .statusBarsPadding()
+                ) {
+                    // Custom Glass-themed Address bar row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Profiles list toggle button
+                        IconButton(
+                            onClick = { scope.launch { drawerState.open() } },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Perfiles de Navegación",
+                                tint = AccentTeal
+                            )
+                        }
+
+                        // Profile badge / label indicator
+                        activeProfile?.let { profile ->
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = 2.dp, end = 8.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AccentTeal.copy(alpha = 0.15.toFloat()))
+                                    .border(1.dp, AccentTeal, RoundedCornerShape(8.dp))
+                                    .clickable { showProtectionShieldDialog = true }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = profile.name,
+                                    color = BrightCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 90.dp)
+                                )
+                            }
+                        }
+
+                        // Custom Address Search bar
+                        var tempAddressText by remember { mutableStateOf("") }
+                        var isFocused by remember { mutableStateOf(false) }
+
+                        LaunchedEffect(urlText) {
+                            tempAddressText = urlText
+                        }
+
+                        OutlinedTextField(
+                            value = tempAddressText,
+                            onValueChange = { tempAddressText = it },
+                            textStyle = LocalTextStyle.current.copy(
+                                color = TextOffWhite,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            placeholder = { Text("Buscar o ingresar URL", color = TextMuted, fontSize = 12.sp) },
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (activeProfile?.isIncognito == true) Icons.Default.Lock else Icons.Default.Search,
+                                    contentDescription = "URL status icon",
+                                    tint = if (activeProfile?.isIncognito == true) GlowGreen else TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (tempAddressText.isNotEmpty()) {
+                                    IconButton(onClick = { tempAddressText = "" }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = "Clear address bar",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = BrightCyan,
+                                unfocusedBorderColor = CardBackground,
+                                focusedContainerColor = LightAccents,
+                                unfocusedContainerColor = CardBackground,
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp),
+                            // Handle send key press or typing finish
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                onDone = {
+                                    viewModel.navigateTo(tempAddressText)
+                                }
+                            ),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri
+                            )
+                        )
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // Navigation actions button (Go / Search)
+                        IconButton(
+                            onClick = { viewModel.navigateTo(tempAddressText) },
+                            modifier = Modifier
+                                .padding(horizontal = 2.dp)
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(LightAccents)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowForward,
+                                contentDescription = "Navigate to Address",
+                                tint = BrightCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // Navigation Controller row (Back, Forward, Ref, Option tabs)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp, start = 8.dp, end = 8.dp),
+                        horizontalArrangement = BoxArrangement(BoxAlignmentGrid)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { webViewInstance?.goBack() }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Go Back", tint = TextOffWhite, modifier = Modifier.size(16.dp))
+                            }
+                            IconButton(onClick = { webViewInstance?.goForward() }) {
+                                Icon(Icons.Default.ArrowForward, contentDescription = "Go Forward", tint = TextOffWhite, modifier = Modifier.size(16.dp))
+                            }
+                            IconButton(onClick = { webViewInstance?.reload() }) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh Page", tint = TextOffWhite, modifier = Modifier.size(16.dp))
+                            }
+                            IconButton(onClick = { webViewInstance?.loadUrl(activeProfile?.initialUrl ?: "https://www.google.com") }) {
+                                Icon(Icons.Default.Home, contentDescription = "Homepage", tint = TextOffWhite, modifier = Modifier.size(16.dp))
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Bookmark toggle button
+                            IconButton(
+                                onClick = {
+                                    val currentTitle = webViewInstance?.title ?: "Nueva Página"
+                                    viewModel.toggleBookmark(currentTitle, urlText)
+                                }
+                            ) {
+                                val isBookmarked = bookmarks.any { it.url == urlText }
+                                Icon(
+                                    imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    contentDescription = "Toggle Bookmark",
+                                    tint = if (isBookmarked) BrightCyan else TextOffWhite,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Bookmarks List dialog trigger
+                            IconButton(onClick = { showBookmarksDialog = true }) {
+                                Icon(Icons.Default.Star, contentDescription = "Bookmarks List", tint = TextOffWhite, modifier = Modifier.size(18.dp))
+                            }
+
+                            // History dialog trigger
+                            IconButton(onClick = { showHistoryDialog = true }) {
+                                Icon(Icons.Default.History, contentDescription = "History Log", tint = TextOffWhite, modifier = Modifier.size(18.dp))
+                            }
+
+                            // Active protection shield metrics trigger
+                            IconButton(onClick = { showProtectionShieldDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "Protección Antidetect",
+                                    tint = GlowGreen,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Loading Progress Indicator
+                    if (isPageLoading) {
+                        LinearProgressIndicator(
+                            progress = { loadingProgress.toFloat() / 100f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp),
+                            color = BrightCyan,
+                            trackColor = Color.Transparent,
+                        )
+                    } else {
+                        Divider(
+                            color = CardBackground,
+                            thickness = 1.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            },
+            bottomBar = {
+                // Bottom stats ribbon styled with Elegant Dark MD3 bar background and safe area padding
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF211F26))
+                ) {
+                    HorizontalDivider(color = Color(0xFF49454F), thickness = 1.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(if (activeProfile?.proxyType != "DIRECT") GlowGreen else TextMuted)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (activeProfile?.proxyType != "DIRECT") {
+                                    "Conectado vía ${activeProfile?.proxyType}: ${activeProfile?.proxyHost}"
+                                } else "Conexión Directa (Sin Proxy)",
+                                color = TextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        Text(
+                            text = "Antidetect: ${if (activeProfile?.canvasNoiseEnabled == true) "Activo" else "Básico"}",
+                            color = BrightCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            },
+            containerColor = PremiumVoid
+        ) { paddingValues ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .background(PremiumVoid)
+            ) {
+                AndroidView(
+                    factory = { context ->
+                        WebView(context).apply {
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            setupWebViewConfigurations(this, viewModel)
+                            webViewInstance = this
+                            
+                            // Load initial starting Url
+                            activeProfile?.let {
+                                loadUrl(it.lastVisitedUrl)
+                            } ?: loadUrl("https://www.google.com")
+                        }
+                    },
+                    update = {
+                        // Handled dynamically via triggers & launched effects to prevent reload on recreation
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+    }
+
+    // Dialog components
+    if (showCreateProfileDialog) {
+        CreateProfileDialog(
+            onDismiss = { showCreateProfileDialog = false },
+            onCreate = { name, initialUrl, userAgentType, customUa, proxyType, proxyHost, proxyPort, proxyUser, proxyPass, isIncognito, canvasNoise, webglSpoof, platform, languages ->
+                viewModel.createProfile(
+                    name, initialUrl, userAgentType, customUa, proxyType, proxyHost, proxyPort, proxyUser, proxyPass, isIncognito, canvasNoise, webglSpoof, platform, languages
+                )
+                showCreateProfileDialog = false
+            }
+        )
+    }
+
+    if (showProtectionShieldDialog) {
+        ProtectionShieldDialog(
+            profile = activeProfile,
+            onDismiss = { showProtectionShieldDialog = false },
+            onUpdateSettings = { updated ->
+                viewModel.updateActiveProfile(updated)
+            },
+            onResetSession = {
+                viewModel.resetSession()
+                showProtectionShieldDialog = false
+            }
+        )
+    }
+
+    if (showHistoryDialog) {
+        HistoryDialog(
+            historyList = history,
+            onDismiss = { showHistoryDialog = false },
+            onNavigateTo = { url ->
+                viewModel.navigateTo(url)
+                showHistoryDialog = false
+            },
+            onClearHistory = {
+                viewModel.clearActiveHistory()
+            }
+        )
+    }
+
+    if (showBookmarksDialog) {
+        BookmarksDialog(
+            bookmarksList = bookmarks,
+            onDismiss = { showBookmarksDialog = false },
+            onNavigateTo = { url ->
+                viewModel.navigateTo(url)
+                showBookmarksDialog = false
+            },
+            onDeleteBookmark = { id ->
+                viewModel.deleteBookmark(id)
+            }
+        )
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewModel) {
+    val settings = webView.settings
+    settings.javaScriptEnabled = true
+    settings.domStorageEnabled = true
+    settings.databaseEnabled = true
+    settings.useWideViewPort = true
+    settings.loadWithOverviewMode = true
+    settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+
+    // Zooming settings
+    settings.setSupportZoom(true)
+    settings.builtInZoomControls = true
+    settings.displayZoomControls = false
+
+    // Cache settings
+    settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+    webView.webChromeClient = object : WebChromeClient() {
+        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+            super.onProgressChanged(view, newProgress)
+            viewModel.loadingProgress.value = newProgress
+        }
+    }
+
+    webView.webViewClient = object : WebViewClient() {
+        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+            super.onPageStarted(view, url, favicon)
+            viewModel.isPageLoading.value = true
+            if (url != null) {
+                viewModel.currentUrlText.value = url
+            }
+
+            // Document start injection fallback
+            viewModel.activeProfile.value?.let { p ->
+                // Pre-load stored isolated localStorage values if present
+                if (p.localStorageJson.isNotEmpty() && p.localStorageJson != "{}") {
+                    val storageScript = """
+                        (function() {
+                            try {
+                                const localData = ${p.localStorageJson};
+                                for (const key in localData) {
+                                    localStorage.setItem(key, localData[key]);
+                                }
+                            } catch (e) {
+                                console.error("localStorage preload injection failed", e);
+                            }
+                        })();
+                    """.trimIndent()
+                    view?.evaluateJavascript(storageScript, null)
+                }
+
+                val script = FingerprintSpoofer.getSpoofingScript(p)
+                view?.evaluateJavascript(script, null)
+            }
+        }
+
+        override fun onPageFinished(view: WebView?, url: String?) {
+            super.onPageFinished(view, url)
+            viewModel.isPageLoading.value = false
+            if (url != null) {
+                viewModel.currentUrlText.value = url
+                val title = view?.title ?: "Página Web"
+                viewModel.recordHistory(title, url)
+
+                // Inject finished-loading local storage check
+                viewModel.activeProfile.value?.let { p ->
+                    if (p.localStorageJson.isNotEmpty() && p.localStorageJson != "{}") {
+                        val storageScript = """
+                            (function() {
+                                try {
+                                    const localData = ${p.localStorageJson};
+                                    for (const key in localData) {
+                                        localStorage.setItem(key, localData[key]);
+                                    }
+                                } catch (e) {
+                                    console.error("localStorage postload injection failed", e);
+                                }
+                            })();
+                        """.trimIndent()
+                        view?.evaluateJavascript(storageScript, null)
+                    }
+                }
+
+                // Retrieve the updated localStorage and persist it
+                view?.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
+                    val cleanJson = sanitizeJsStringResult(result)
+                    viewModel.updateActiveProfileLocalStorage(cleanJson)
+                }
+            }
+        }
+
+        override fun onReceivedHttpAuthRequest(
+            view: WebView?,
+            handler: HttpAuthHandler?,
+            host: String?,
+            realm: String?
+        ) {
+            val active = viewModel.activeProfile.value
+            if (active != null && active.proxyUser.isNotEmpty() && active.proxyPass.isNotEmpty()) {
+                handler?.proceed(active.proxyUser, active.proxyPass)
+            } else {
+                super.onReceivedHttpAuthRequest(view, handler, host, realm)
+            }
+        }
+    }
+}
+
+@Composable
+fun DrawerProfilePanel(
+    profiles: List<BrowserProfile>,
+    activeProfile: BrowserProfile?,
+    onSelectProfile: (Long) -> Unit,
+    onCreateProfileClick: () -> Unit,
+    onDeleteProfileClick: (BrowserProfile) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PremiumVoid)
+            .padding(16.dp)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "IncogNav",
+                    color = ElegantLilac,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.SansSerif
+                )
+                Text(
+                    text = "ISOLATED BROWSER",
+                    color = TextMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified,
+                    fontFamily = FontFamily.SansSerif
+                )
+            }
+            
+            IconButton(
+                onClick = onCreateProfileClick,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(BrightCyan)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add, 
+                    contentDescription = "Nuevo Perfil", 
+                    tint = AccentElectric,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "Estructuras de perfil con contenedores de cookies totalmente sellados.",
+            color = TextMuted,
+            fontSize = 11.sp
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "Perfiles de Navegación",
+            color = TextOffWhite,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(profiles) { profile ->
+                val isActive = profile.id == activeProfile?.id
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(if (isActive) LightAccents else CardBackground)
+                        .border(
+                            width = 1.dp,
+                            color = if (isActive) BrightCyan else Color(0xFF49454F),
+                            shape = RoundedCornerShape(24.dp)
+                        )
+                        .clickable { onSelectProfile(profile.id) }
+                        .padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF4A4458)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (profile.isIncognito) Icons.Default.Lock else Icons.Default.Language,
+                                contentDescription = null,
+                                tint = if (profile.isIncognito) Color(0xFFEFB8C8) else Color(0xFFD0BCFF),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 12.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = profile.name,
+                                    color = TextOffWhite,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (isActive) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(GlowGreen)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${profile.spoofedPlatform} • ${if (profile.proxyType == "DIRECT") "Direto" else "${profile.proxyType} Proxy"}",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(99.dp))
+                                    .background(if (isActive) Color(0xFF381E72) else Color(0xFF49454F))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (isActive) "ACTIVE" else "STANDBY",
+                                    color = if (isActive) Color(0xFFD0BCFF) else Color(0xFFCAC4D0),
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            
+                            if (profiles.size > 1) {
+                                IconButton(
+                                    onClick = { onDeleteProfileClick(profile) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Borrar perfil",
+                                        tint = Color(0xFFCAC4D0),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFFEADDFF).copy(alpha = 0.05f))
+                    .border(1.dp, Color(0xFFEADDFF).copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "ISOLATION ENGINE",
+                        color = TextMuted,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "v2.4 Secure Hub",
+                        color = BrightCyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFFEADDFF).copy(alpha = 0.05f))
+                    .border(1.dp, Color(0xFFEADDFF).copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "ACTIVE TUNNELS",
+                        color = TextMuted,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    val activeProxiesCount = profiles.count { it.proxyType != "DIRECT" }
+                    Text(
+                        text = "$activeProxiesCount Global Tunnel" + (if (activeProxiesCount != 1) "s" else ""),
+                        color = BrightCyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Complete profile builder form dialog
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateProfileDialog(
+    onDismiss: () -> Unit,
+    onCreate: (
+        name: String,
+        initialUrl: String,
+        userAgentType: String,
+        customUa: String,
+        proxyType: String,
+        proxyHost: String,
+        proxyPort: String,
+        proxyUser: String,
+        proxyPass: String,
+        isIncognito: Boolean,
+        canvasNoise: Boolean,
+        webglSpoof: Boolean,
+        platform: String,
+        languages: String
+    ) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var initialUrl by remember { mutableStateOf("https://www.google.com") }
+    var userAgentType by remember { mutableStateOf("Default") }
+    var customUa by remember { mutableStateOf("") }
+    var proxyType by remember { mutableStateOf("DIRECT") }
+    var proxyHost by remember { mutableStateOf("") }
+    var proxyPort by remember { mutableStateOf("") }
+    var proxyUser by remember { mutableStateOf("") }
+    var proxyPass by remember { mutableStateOf("") }
+    var isIncognito by remember { mutableStateOf(false) }
+    var canvasNoise by remember { mutableStateOf(true) }
+    var webglSpoof by remember { mutableStateOf(true) }
+    var platform by remember { mutableStateOf("Default") }
+    var languages by remember { mutableStateOf("Default") }
+
+    val userAgentOptions = listOf("Default", "Chrome Desktop", "Safari Mac", "Chrome Mobile", "Safari iPhone", "Custom")
+    val proxyOptions = listOf("DIRECT", "HTTP", "HTTPS", "SOCKS4", "SOCKS5")
+    val platformOptions = listOf("Default", "Win32", "MacIntel", "iPhone", "Linux armv8l")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Crear Perfil de Navegación", color = BrightCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    Column {
+                        Text("Nombre del perfil *", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            placeholder = { Text("Ej. Juan Spotify") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                item {
+                    Column {
+                        Text("URL Inicial", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        OutlinedTextField(
+                            value = initialUrl,
+                            onValueChange = { initialUrl = it },
+                            placeholder = { Text("https://www.google.com") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                item {
+                    Column {
+                        Text("User Agent Presets", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { expanded = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("$userAgentType ▾", color = BrightCyan)
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                                modifier = Modifier.background(PremiumVoid)
+                            ) {
+                                userAgentOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option, color = TextOffWhite) },
+                                        onClick = {
+                                            userAgentType = option
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (userAgentType == "Custom") {
+                    item {
+                        Column {
+                            Text("User Agent String Personalizado", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                            OutlinedTextField(
+                                value = customUa,
+                                onValueChange = { customUa = it },
+                                placeholder = { Text("Mozilla/5.0 ...") },
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Modo Incógnito Integrado", color = TextOffWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("No graba historial y limpia al salir", color = TextMuted, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = isIncognito,
+                            onCheckedChange = { isIncognito = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = GlowGreen)
+                        )
+                    }
+                }
+
+                item {
+                    Text("Configuraciones de Proxy", color = BrightCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                item {
+                    Column {
+                        Text("Tipo de Proxy", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { expanded = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("$proxyType ▾", color = BrightCyan)
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                                modifier = Modifier.background(PremiumVoid)
+                            ) {
+                                proxyOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option, color = TextOffWhite) },
+                                        onClick = {
+                                            proxyType = option
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (proxyType != "DIRECT") {
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(modifier = Modifier.weight(2f)) {
+                                Text("Host / IP", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                OutlinedTextField(
+                                    value = proxyHost,
+                                    onValueChange = { proxyHost = it },
+                                    placeholder = { Text("12.34.56.78") },
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Puerto", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                OutlinedTextField(
+                                    value = proxyPort,
+                                    onValueChange = { proxyPort = it },
+                                    placeholder = { Text("8080") },
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Usuario Proxy (Opcional)", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                OutlinedTextField(
+                                    value = proxyUser,
+                                    onValueChange = { proxyUser = it },
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Clave Proxy (Opcional)", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                OutlinedTextField(
+                                    value = proxyPass,
+                                    onValueChange = { proxyPass = it },
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Text("Protecciones Avanzadas (Antidetect)", color = BrightCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Canvas Ruido Invisible", color = TextOffWhite, fontSize = 12.sp)
+                            Text("Evita rastreos por huella WebGL/Canvas", color = TextMuted, fontSize = 9.sp)
+                        }
+                        Switch(
+                            checked = canvasNoise,
+                            onCheckedChange = { canvasNoise = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = GlowGreen)
+                        )
+                    }
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("WebGL Spoofing Inteligente", color = TextOffWhite, fontSize = 12.sp)
+                            Text("Disfraza la tarjeta gráfica real", color = TextMuted, fontSize = 9.sp)
+                        }
+                        Switch(
+                            checked = webglSpoof,
+                            onCheckedChange = { webglSpoof = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = GlowGreen)
+                        )
+                    }
+                }
+
+                item {
+                    Column {
+                        Text("Spoofing de Plataforma", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { expanded = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("$platform ▾", color = BrightCyan)
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                                modifier = Modifier.background(PremiumVoid)
+                            ) {
+                                platformOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option, color = TextOffWhite) },
+                                        onClick = {
+                                            platform = option
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Column {
+                        Text("Idiomas del Navegador (Spoof)", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        OutlinedTextField(
+                            value = languages,
+                            onValueChange = { languages = it },
+                            placeholder = { Text("Default o ej: es-MX,es;q=0.9") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.trim().isNotEmpty()) {
+                        onCreate(
+                            name.trim(), initialUrl.trim(), userAgentType, customUa.trim(), proxyType, proxyHost.trim(), proxyPort.trim(), proxyUser.trim(), proxyPass, isIncognito, canvasNoise, webglSpoof, platform, languages.trim()
+                        )
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
+                enabled = name.trim().isNotEmpty()
+            ) {
+                Text("Crear", color = BrightCyan)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = TextMuted)
+            }
+        },
+        containerColor = PremiumVoid
+    )
+}
+
+// Metricas de proteccion y configuracion dialog
+@Composable
+fun ProtectionShieldDialog(
+    profile: BrowserProfile?,
+    onDismiss: () -> Unit,
+    onUpdateSettings: (BrowserProfile) -> Unit,
+    onResetSession: () -> Unit
+) {
+    if (profile == null) return
+
+    var canvasNoise by remember { mutableStateOf(profile.canvasNoiseEnabled) }
+    var webglSpoof by remember { mutableStateOf(profile.webGlSpoofEnabled) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lock, contentDescription = null, tint = GlowGreen, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Escudo de Protección", color = BrightCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = "Ajustes de privacidad y protecciones activas para el perfil '${profile.name}'",
+                    color = TextOffWhite,
+                    fontSize = 12.sp
+                )
+
+                // Canvas toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Ruido de firma Canvas", color = TextOffWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("Enmascara el Canvas Fingerprint inyectando pixeles invisibles aleatorios.", color = TextMuted, fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = canvasNoise,
+                        onCheckedChange = {
+                            canvasNoise = it
+                            onUpdateSettings(profile.copy(canvasNoiseEnabled = it))
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = GlowGreen)
+                    )
+                }
+
+                // WebGL toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Spoofing WebGL GPU", color = TextOffWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("Devuelve un hardware de tarjeta gráfica falso de PC/Apple para aislar la firma.", color = TextMuted, fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = webglSpoof,
+                        onCheckedChange = {
+                            webglSpoof = it
+                            onUpdateSettings(profile.copy(webGlSpoofEnabled = it))
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = GlowGreen)
+                    )
+                }
+
+                Divider(color = CardBackground)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CardBackground)
+                        .padding(10.dp)
+                ) {
+                    Column {
+                        Text("FINGERPRINT SIMULATION", color = BrightCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("UserAgent: ${FingerprintSpoofer.getProfileUserAgent(profile)}", color = TextOffWhite, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Plataforma: ${FingerprintSpoofer.getProfilePlatform(profile)}", color = TextOffWhite, fontSize = 10.sp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Idiomas: ${profile.spoofedLanguages}", color = TextOffWhite, fontSize = 10.sp)
+                    }
+                }
+                
+                Button(
+                    onClick = onResetSession,
+                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Reiniciar cookies y sesión", color = Color.White)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = AccentTeal)) {
+                Text("Listo", color = BrightCyan)
+            }
+        },
+        containerColor = PremiumVoid
+    )
+}
+
+@Composable
+fun HistoryDialog(
+    historyList: List<ProfileHistory>,
+    onDismiss: () -> Unit,
+    onNavigateTo: (String) -> Unit,
+    onClearHistory: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Historial de Navegación", color = BrightCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (historyList.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                        Text("No hay historial guardado en este perfil", color = TextMuted)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(historyList) { item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(CardBackground)
+                                    .clickable { onNavigateTo(item.url) }
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = item.title, color = TextOffWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(text = item.url, color = TextMuted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Icon(Icons.Default.ArrowForward, contentDescription = null, tint = BrightCyan, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                    
+                    TextButton(
+                        onClick = onClearHistory,
+                        colors = ButtonDefaults.textButtonColors(contentColor = DangerRed)
+                    ) {
+                        Text("Limpiar todo el historial")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = AccentTeal)) {
+                Text("Cerrar", color = BrightCyan)
+            }
+        },
+        containerColor = PremiumVoid
+    )
+}
+
+@Composable
+fun BookmarksDialog(
+    bookmarksList: List<ProfileBookmark>,
+    onDismiss: () -> Unit,
+    onNavigateTo: (String) -> Unit,
+    onDeleteBookmark: (Long) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Marcadores Guardados", color = BrightCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            if (bookmarksList.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                    Text("No hay marcadores guardados", color = TextMuted)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(bookmarksList) { item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CardBackground)
+                                .clickable { onNavigateTo(item.url) }
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = item.title, color = TextOffWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(text = item.url, color = TextMuted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            
+                            IconButton(onClick = { onDeleteBookmark(item.id) }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Delete, contentDescription = "Borrar", tint = DangerRed.copy(0.7f), modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = AccentTeal)) {
+                Text("Cerrar", color = BrightCyan)
+            }
+        },
+        containerColor = PremiumVoid
+    )
+}
+
+// Custom Grid align helper for bottom navigation icons layout
+@Composable
+private fun BoxArrangement(gridAlign: Arrangement.Horizontal): Arrangement.Horizontal = gridAlign
+
+private val BoxAlignmentGrid = Arrangement.SpaceBetween
+
+@Composable
+fun Greeting(name: String, modifier: Modifier = Modifier) {
+    Text(text = "Hello $name!", modifier = modifier)
+}
+
+fun sanitizeJsStringResult(jsResult: String?): String {
+    if (jsResult == null || jsResult == "null") return "{}"
+    var s = jsResult.trim()
+    if (s.startsWith("\"") && s.endsWith("\"") && s.length >= 2) {
+        s = s.substring(1, s.length - 1)
+        // unescape backslashes and quotes
+        s = s.replace("\\\"", "\"").replace("\\\\", "\\")
+    }
+    return if (s.startsWith("{") && s.endsWith("}")) s else "{}"
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DashboardScreen(
+    profiles: List<com.example.data.BrowserProfile>,
+    onSelectProfile: (Long) -> Unit,
+    onCreateProfileClick: () -> Unit,
+    onOpenDrawerClick: () -> Unit,
+    onDeleteProfile: (com.example.data.BrowserProfile) -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = "IncogNav",
+                            color = ElegantLilac,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.SansSerif
+                        )
+                        Text(
+                            text = "CENTRO DE CONTROL",
+                            color = TextMuted,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            fontFamily = FontFamily.SansSerif
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawerClick) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Abrir Menú",
+                            tint = AccentTeal
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = onCreateProfileClick,
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AccentTeal.copy(alpha = 0.15f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Crear Perfil",
+                            tint = BrightCyan
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = PremiumVoid,
+                    titleContentColor = TextOffWhite
+                )
+            )
+        },
+        containerColor = PremiumVoid
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(bottom = 32.dp)
+        ) {
+            // Hero Welcome Card
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(Color(0xFF381E72), CardBackground)
+                            )
+                        )
+                        .border(1.dp, Color(0xFFEADDFF).copy(alpha = 0.15f), RoundedCornerShape(24.dp))
+                        .padding(20.dp)
+                ) {
+                    Column {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(BrightCyan.copy(alpha = 0.15f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(androidx.compose.foundation.shape.CircleShape)
+                                        .background(GlowGreen)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "ENTORNO SEGURO Y DESACOPLADO",
+                                    color = BrightCyan,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            text = "Navegación Antidetect Multicuenta",
+                            color = TextOffWhite,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        
+                        Spacer(modifier = Modifier.height(6.dp))
+                        
+                        Text(
+                            text = "Aísla de manera absoluta cookies, localStorage, huella WebGL y User-Agent por cada perfil. Las conexiones e inicios no se autoactivan para ahorrar datos móviles y acelerar el inicio del aplicativo.",
+                            color = TextMuted,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
+            // Stats row
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Profile count card
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(CardBackground)
+                            .border(1.dp, Color(0xFF49454F), RoundedCornerShape(20.dp))
+                            .padding(16.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "PERFILES",
+                                    color = TextMuted,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    tint = BrightCyan,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${profiles.size}",
+                                color = TextOffWhite,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Active proxies card
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(CardBackground)
+                            .border(1.dp, Color(0xFF49454F), RoundedCornerShape(20.dp))
+                            .padding(16.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "TÚNELES PROXY",
+                                    color = TextMuted,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = BrightCyan,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val activeProxies = profiles.count { it.proxyType != "DIRECT" }
+                            Text(
+                                text = "$activeProxies Activo" + (if (activeProxies != 1) "s" else ""),
+                                color = TextOffWhite,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Connection guidelines title
+            item {
+                Text(
+                    text = "Tus Perfiles Disponibles",
+                    color = ElegantLilac,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                )
+            }
+
+            // Profiles list logic
+            if (profiles.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(CardBackground)
+                            .border(1.dp, Color(0xFF49454F), RoundedCornerShape(20.dp))
+                            .clickable { onCreateProfileClick() }
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = TextMuted,
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Text(
+                                text = "Sin perfiles todavía",
+                                color = TextOffWhite,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Toca aquí para crear tu primer perfil y comenzar a navegar de forma aislada.",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                lineHeight = 16.sp
+                            )
+                            Button(
+                                onClick = onCreateProfileClick,
+                                colors = ButtonDefaults.buttonColors(containerColor = BrightCyan),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.padding(top = 8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, tint = AccentElectric)
+                                    Text("Crear Perfil", color = AccentElectric, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                items(profiles) { profile ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(CardBackground)
+                            .border(1.dp, Color(0xFF49454F), RoundedCornerShape(20.dp))
+                            .clickable { onSelectProfile(profile.id) }
+                            .padding(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF4A4458)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (profile.isIncognito) Icons.Default.Lock else Icons.Default.Language,
+                                    contentDescription = null,
+                                    tint = if (profile.isIncognito) Color(0xFFEFB8C8) else Color(0xFFD0BCFF),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 12.dp)
+                            ) {
+                                Text(
+                                    text = profile.name,
+                                    color = TextOffWhite,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${profile.spoofedPlatform} • ${if (profile.proxyType == "DIRECT") "Conexión Directa" else "${profile.proxyType} Proxied"}",
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (profile.lastVisitedUrl.isNotEmpty() && profile.lastVisitedUrl != profile.initialUrl) {
+                                    Text(
+                                        text = "Última: ${profile.lastVisitedUrl}",
+                                        color = BrightCyan.copy(alpha = 0.8f),
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            
+                            IconButton(
+                                onClick = { onDeleteProfile(profile) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Borrar perfil",
+                                    tint = DangerRed.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

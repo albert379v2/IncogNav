@@ -1,0 +1,6 @@
+{
+  "name": "IncogNav",
+  "description": "Navegador de alta privacidad con múltiples perfiles aislados, spoofing de fingerprints, soporte de proxy y modo incógnito.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
