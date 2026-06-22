@@ -19,6 +19,23 @@ object FingerprintSpoofer {
         val lat = if (geo.size == 2) geo[0].trim() else "0"
         val lon = if (geo.size == 2) geo[1].trim() else "0"
 
+        val isMobile = if (ua.contains("Mobile", ignoreCase = true) || ua.contains("iPhone", ignoreCase = true)) "true" else "false"
+        val platformName = when {
+            platform.contains("Win", ignoreCase = true) -> "Windows"
+            platform.contains("Mac", ignoreCase = true) -> "macOS"
+            platform.contains("iPhone", ignoreCase = true) || platform.contains("iOS", ignoreCase = true) -> "iOS"
+            else -> "Android"
+        }
+        val modelName = if (isMobile == "true") {
+            if (platformName == "iOS") "iPhone" else "Android Phone"
+        } else ""
+        val platformVersionName = when (platformName) {
+            "Windows" -> "10.0.0"
+            "macOS" -> "14.4.1"
+            "iOS" -> "17.4"
+            else -> "14.0.0"
+        }
+
         // Minified JS to spoof navigator parameters and Canvas/WebGL attributes
         return """
             (function() {
@@ -36,6 +53,52 @@ object FingerprintSpoofer {
                     Object.defineProperty(navigator, 'languages', {
                         get: function() { return [$languages]; }
                     });
+
+                    if (navigator.userAgentData) {
+                        const isMobileVal = $isMobile;
+                        const pfVal = "$platformName";
+                        const modelVal = "$modelName";
+                        const pfVerVal = "$platformVersionName";
+                        
+                        const spoofedUserAgentData = {
+                            brands: [
+                                { brand: 'Chromium', version: '124' },
+                                { brand: 'Google Chrome', version: '124' },
+                                { brand: 'Not-A.Brand', version: '99' }
+                            ],
+                            mobile: isMobileVal,
+                            platform: pfVal,
+                            getHighEntropyValues: function(hints) {
+                                return new Promise((resolve) => {
+                                    const response = {
+                                        brands: [
+                                            { brand: 'Chromium', version: '124' },
+                                            { brand: 'Google Chrome', version: '124' },
+                                            { brand: 'Not-A.Brand', version: '99' }
+                                        ],
+                                        mobile: isMobileVal,
+                                        platform: pfVal,
+                                        architecture: pfVal === "Windows" ? "x86" : (pfVal === "macOS" ? "arm" : ""),
+                                        bitness: "64",
+                                        model: modelVal,
+                                        platformVersion: pfVerVal,
+                                        uaFullVersion: "124.0.0.0"
+                                    };
+                                    const result = {};
+                                    if (hints && Array.isArray(hints)) {
+                                        hints.forEach(hint => {
+                                            if (hint in response) result[hint] = response[hint];
+                                        });
+                                    }
+                                    resolve(Object.assign({}, response, result));
+                                });
+                            }
+                        };
+                        
+                        Object.defineProperty(navigator, 'userAgentData', {
+                            get: function() { return spoofedUserAgentData; }
+                        });
+                    }
                 } catch (e) {
                     console.error("Navigator spoofing blocked: ", e);
                 }
