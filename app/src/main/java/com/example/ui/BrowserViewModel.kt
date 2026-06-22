@@ -180,7 +180,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             val startDomain = getDomainUrlOnly(pUrl)
             repository.addVisitedDomain(newId, startDomain)
 
-            selectProfile(newId)
+            // Auto-open logic: only open if this is NOT the first profile created
+            val existingProfiles = repository.allProfiles.first()
+            if (existingProfiles.isNotEmpty() && existingProfiles.size > 1) {
+                selectProfile(newId)
+            }
         }
     }
 

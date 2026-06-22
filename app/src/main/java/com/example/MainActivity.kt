@@ -763,12 +763,6 @@ fun DrawerProfilePanel(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        Text(
-            text = "Estructuras de perfil con contenedores de cookies totalmente sellados.",
-            color = TextMuted,
-            fontSize = 11.sp
-        )
-
         Spacer(modifier = Modifier.height(14.dp))
 
         Button(
