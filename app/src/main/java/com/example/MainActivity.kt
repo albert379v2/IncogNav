@@ -11,6 +11,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -147,6 +148,8 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
         }
     }
 
+    val context = LocalContext.current
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = false,
@@ -181,6 +184,9 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                     },
                     onCloseClick = {
                         scope.launch { drawerState.close() }
+                    },
+                    onClearCacheClick = {
+                        viewModel.clearGlobalCache(context)
                     }
                 )
             }
@@ -204,6 +210,20 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                 }
             )
         } else {
+            BackHandler(enabled = true) {
+                if (webViewInstance?.canGoBack() == true) {
+                    webViewInstance?.goBack()
+                } else {
+                    webViewInstance?.let { webView ->
+                        webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
+                            val cleanJson = sanitizeJsStringResult(result)
+                            viewModel.closeActiveProfile(currentUrl = urlText, currentLocalStorageJson = cleanJson)
+                        }
+                    } ?: run {
+                        viewModel.closeActiveProfile()
+                    }
+                }
+            }
             Scaffold(
                 topBar = {
                     Column(
@@ -499,6 +519,10 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
             onResetSession = {
                 viewModel.resetSession()
                 showProtectionShieldDialog = false
+            },
+            onClearWebCache = {
+                viewModel.clearGlobalCache(context)
+                showProtectionShieldDialog = false
             }
         )
     }
@@ -656,7 +680,8 @@ fun DrawerProfilePanel(
     onSelectProfile: (Long) -> Unit,
     onCreateProfileClick: () -> Unit,
     onDeleteProfileClick: (BrowserProfile) -> Unit,
-    onCloseClick: () -> Unit
+    onCloseClick: () -> Unit,
+    onClearCacheClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -830,18 +855,16 @@ fun DrawerProfilePanel(
                                 )
                             }
                             
-                            if (profiles.size > 1) {
-                                IconButton(
-                                    onClick = { onDeleteProfileClick(profile) },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Borrar perfil",
-                                        tint = Color(0xFFCAC4D0),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
+                            IconButton(
+                                onClick = { onDeleteProfileClick(profile) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Borrar perfil",
+                                    tint = Color(0xFFCAC4D0),
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         }
                     }
@@ -907,6 +930,27 @@ fun DrawerProfilePanel(
                     )
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Global Clear Cache & Purge button inside drawer
+        Button(
+            onClick = onClearCacheClick,
+            colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, BrightCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Limpiar Caché Global",
+                tint = BrightCyan,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Limpiar Caché Global", color = TextOffWhite, fontSize = 12.sp)
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -1310,7 +1354,8 @@ fun ProtectionShieldDialog(
     profile: BrowserProfile?,
     onDismiss: () -> Unit,
     onUpdateSettings: (BrowserProfile) -> Unit,
-    onResetSession: () -> Unit
+    onResetSession: () -> Unit,
+    onClearWebCache: () -> Unit
 ) {
     if (profile == null) return
 
@@ -1329,9 +1374,9 @@ fun ProtectionShieldDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(
-                    text = "Ajustes de privacidad y protecciones activas para el perfil '${profile.name}'",
-                    color = TextOffWhite,
-                    fontSize = 12.sp
+                     text = "Ajustes de privacidad y protecciones activas para el perfil '${profile.name}'",
+                     color = TextOffWhite,
+                     fontSize = 12.sp
                 )
 
                 // Canvas toggle
@@ -1402,6 +1447,18 @@ fun ProtectionShieldDialog(
                     Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Reiniciar cookies y sesión", color = Color.White)
+                }
+
+                Button(
+                    onClick = onClearWebCache,
+                    colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, DangerRed.copy(0.4f), RoundedCornerShape(100.dp))
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = DangerRed)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Limpiar caché de navegación", color = TextOffWhite)
                 }
             }
         },

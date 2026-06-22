@@ -107,6 +107,37 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun closeActiveProfile(
+        currentUrl: String = "",
+        currentLocalStorageJson: String? = null
+    ) {
+        viewModelScope.launch {
+            val oldProfile = _activeProfile.value
+            if (oldProfile != null) {
+                var updatedOld = oldProfile
+                if (currentUrl.isNotEmpty()) {
+                    updatedOld = updatedOld.copy(lastVisitedUrl = currentUrl)
+                }
+                if (currentLocalStorageJson != null) {
+                    updatedOld = updatedOld.copy(localStorageJson = currentLocalStorageJson)
+                }
+                repository.updateProfile(updatedOld)
+                CookieSyncHelper.saveActiveCookies(oldProfile.id, repository)
+            }
+            _activeProfile.value = null
+            currentUrlText.value = ""
+            try {
+                // Clear proxy override when closing the active profile
+                androidx.webkit.ProxyController.getInstance().clearProxyOverride(
+                    { command -> command.run() },
+                    { /* Proxy cleared */ }
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("IncogNav", "Error reset proxy override on close: ${e.message}")
+            }
+        }
+    }
+
     fun createProfile(
         name: String,
         initialUrl: String,
@@ -177,6 +208,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             repository.clearCookiesForProfile(profile.id)
             repository.deleteHistory(profile.id)
             repository.deleteVisitedDomainsForProfile(profile.id)
+            
+            // Automatically clear temporary caches to keep storage slim on profile deletion
+            try {
+                val context = getApplication<Application>()
+                val webView = android.webkit.WebView(context)
+                webView.clearCache(true)
+                deleteDirRecursive(context.cacheDir)
+            } catch (e: Exception) {
+                android.util.Log.e("IncogNav", "Silent cache cleanup error: ${e.message}")
+            }
             
             if (_activeProfile.value?.id == profile.id) {
                 val remaining = repository.allProfiles.first()
@@ -378,5 +419,36 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         } catch (e: Exception) {
             urlStr
         }
+    }
+
+    fun clearGlobalCache(context: android.content.Context) {
+        viewModelScope.launch {
+            try {
+                // Clear Webview global instance cache
+                val webView = android.webkit.WebView(context)
+                webView.clearCache(true)
+
+                // Recursively delete standard files inside cache directories
+                deleteDirRecursive(context.cacheDir)
+                deleteDirRecursive(context.codeCacheDir)
+
+                android.util.Log.d("IncogNav", "Global cache files and V8 temporary execution buffers cleared successfully")
+            } catch (e: Exception) {
+                android.util.Log.e("IncogNav", "Error executing global cache purge: ${e.message}")
+            }
+        }
+    }
+
+    private fun deleteDirRecursive(file: java.io.File?): Boolean {
+        if (file == null) return false
+        if (file.isDirectory) {
+            val children = file.listFiles()
+            if (children != null) {
+                for (child in children) {
+                    deleteDirRecursive(child)
+                }
+            }
+        }
+        return file.delete()
     }
 }
