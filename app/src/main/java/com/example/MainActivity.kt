@@ -17,6 +17,7 @@ import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -187,32 +190,8 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                             )
                         }
 
-                        // Profile badge / label indicator
-                        activeProfile?.let { profile ->
-                            Box(
-                                modifier = Modifier
-                                    .padding(start = 2.dp, end = 8.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(AccentTeal.copy(alpha = 0.15.toFloat()))
-                                    .border(1.dp, AccentTeal, RoundedCornerShape(8.dp))
-                                    .clickable { showProtectionShieldDialog = true }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = profile.name,
-                                    color = BrightCyan,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.widthIn(max = 90.dp)
-                                )
-                            }
-                        }
-
-                        // Custom Address Search bar
+                        // Custom Address Search bar with nested profile badge and actions
                         var tempAddressText by remember { mutableStateOf("") }
-                        var isFocused by remember { mutableStateOf(false) }
 
                         LaunchedEffect(urlText) {
                             tempAddressText = urlText
@@ -229,21 +208,72 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                             placeholder = { Text("Buscar o ingresar URL", color = TextMuted, fontSize = 12.sp) },
                             singleLine = true,
                             leadingIcon = {
-                                Icon(
-                                    imageVector = if (activeProfile?.isIncognito == true) Icons.Default.Lock else Icons.Default.Search,
+                                activeProfile?.let { profile ->
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(start = 8.dp, end = 2.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentTeal.copy(alpha = 0.15f))
+                                            .border(1.dp, AccentTeal, RoundedCornerShape(6.dp))
+                                            .clickable { showProtectionShieldDialog = true }
+                                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (profile.isIncognito) Icons.Default.Lock else Icons.Default.Language,
+                                                contentDescription = null,
+                                                tint = if (profile.isIncognito) GlowGreen else BrightCyan,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Text(
+                                                text = profile.name,
+                                                color = BrightCyan,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.widthIn(max = 65.dp)
+                                            )
+                                        }
+                                    }
+                                } ?: Icon(
+                                    imageVector = Icons.Default.Search,
                                     contentDescription = "URL status icon",
-                                    tint = if (activeProfile?.isIncognito == true) GlowGreen else TextMuted,
+                                    tint = TextMuted,
                                     modifier = Modifier.size(18.dp)
                                 )
                             },
                             trailingIcon = {
-                                if (tempAddressText.isNotEmpty()) {
-                                    IconButton(onClick = { tempAddressText = "" }) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                ) {
+                                    if (tempAddressText.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { tempAddressText = "" },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Clear,
+                                                contentDescription = "Clear address bar",
+                                                tint = TextMuted,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.navigateTo(tempAddressText) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
                                         Icon(
-                                            imageVector = Icons.Default.Clear,
-                                            contentDescription = "Clear address bar",
-                                            tint = TextMuted,
-                                            modifier = Modifier.size(16.dp)
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = "Navigate to Address",
+                                            tint = BrightCyan,
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
@@ -257,7 +287,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(50.dp),
+                                .height(52.dp),
                             // Handle send key press or typing finish
                             keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                                 onDone = {
@@ -269,25 +299,6 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri
                             )
                         )
-
-                        Spacer(modifier = Modifier.width(4.dp))
-
-                        // Navigation actions button (Go / Search)
-                        IconButton(
-                            onClick = { viewModel.navigateTo(tempAddressText) },
-                            modifier = Modifier
-                                .padding(horizontal = 2.dp)
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(LightAccents)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ArrowForward,
-                                contentDescription = "Navigate to Address",
-                                tint = BrightCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
                     }
 
                     // Navigation Controller row (Back, Forward, Ref, Option tabs)
@@ -539,6 +550,7 @@ private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewM
             viewModel.isPageLoading.value = true
             if (url != null) {
                 viewModel.currentUrlText.value = url
+                viewModel.recordVisitedDomain(url)
             }
 
             // Document start injection fallback
@@ -570,6 +582,7 @@ private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewM
             viewModel.isPageLoading.value = false
             if (url != null) {
                 viewModel.currentUrlText.value = url
+                viewModel.recordVisitedDomain(url)
                 val title = view?.title ?: "Página Web"
                 viewModel.recordHistory(title, url)
 
@@ -636,10 +649,11 @@ fun DrawerProfilePanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column {
+            IncogNavLogo(modifier = Modifier.size(48.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "IncogNav",
                     color = ElegantLilac,
@@ -652,23 +666,22 @@ fun DrawerProfilePanel(
                     color = TextMuted,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
-                    letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified,
                     fontFamily = FontFamily.SansSerif
                 )
             }
-            
+
             IconButton(
                 onClick = onCreateProfileClick,
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .background(BrightCyan)
             ) {
                 Icon(
                     imageVector = Icons.Default.Add, 
                     contentDescription = "Nuevo Perfil", 
-                    tint = AccentElectric,
-                    modifier = Modifier.size(24.dp)
+                    tint = PremiumVoid,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -1185,7 +1198,7 @@ fun CreateProfileDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
                 enabled = name.trim().isNotEmpty()
             ) {
-                Text("Crear", color = BrightCyan)
+                Text("Crear", color = PremiumVoid, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1235,7 +1248,7 @@ fun ProtectionShieldDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Ruido de firma Canvas", color = TextOffWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text("Enmascara el Canvas Fingerprint inyectando pixeles invisibles aleatorios.", color = TextMuted, fontSize = 10.sp)
+                        Text("Enmascara el Canvas Fingerprint inyectando píxeles invisibles aleatorios.", color = TextMuted, fontSize = 10.sp)
                     }
                     Switch(
                         checked = canvasNoise,
@@ -1300,7 +1313,7 @@ fun ProtectionShieldDialog(
         },
         confirmButton = {
             Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = AccentTeal)) {
-                Text("Listo", color = BrightCyan)
+                Text("Listo", color = PremiumVoid, fontWeight = FontWeight.Bold)
             }
         },
         containerColor = PremiumVoid
@@ -1361,7 +1374,7 @@ fun HistoryDialog(
         },
         confirmButton = {
             Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = AccentTeal)) {
-                Text("Cerrar", color = BrightCyan)
+                Text("Cerrar", color = PremiumVoid, fontWeight = FontWeight.Bold)
             }
         },
         containerColor = PremiumVoid
@@ -1416,7 +1429,7 @@ fun BookmarksDialog(
         },
         confirmButton = {
             Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = AccentTeal)) {
-                Text("Cerrar", color = BrightCyan)
+                Text("Cerrar", color = PremiumVoid, fontWeight = FontWeight.Bold)
             }
         },
         containerColor = PremiumVoid
@@ -1432,6 +1445,73 @@ private val BoxAlignmentGrid = Arrangement.SpaceBetween
 @Composable
 fun Greeting(name: String, modifier: Modifier = Modifier) {
     Text(text = "Hello $name!", modifier = modifier)
+}
+
+@Composable
+fun IncogNavLogo(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        
+        // Draw detective hat brim
+        val hatPath = Path().apply {
+            moveTo(w * 0.15f, h * 0.53f)
+            quadraticTo(w * 0.5f, h * 0.48f, w * 0.85f, h * 0.53f)
+            quadraticTo(w * 0.85f, h * 0.58f, w * 0.5f, h * 0.54f)
+            quadraticTo(w * 0.15f, h * 0.58f, w * 0.15f, h * 0.53f)
+            close()
+        }
+        drawPath(hatPath, color = Color.White)
+        
+        // Draw hat crown
+        val crownPath = Path().apply {
+            moveTo(w * 0.32f, h * 0.5f)
+            lineTo(w * 0.28f, h * 0.25f)
+            quadraticTo(w * 0.5f, h * 0.20f, w * 0.72f, h * 0.25f)
+            lineTo(w * 0.68f, h * 0.5f)
+            close()
+        }
+        drawPath(crownPath, color = Color.White)
+        
+        // Draw hat ribbon (glowing lavender color)
+        val ribbonPath = Path().apply {
+            moveTo(w * 0.305f, h * 0.45f)
+            lineTo(w * 0.29f, h * 0.38f)
+            quadraticTo(w * 0.5f, h * 0.35f, w * 0.71f, h * 0.38f)
+            lineTo(w * 0.695f, h * 0.45f)
+            close()
+        }
+        drawPath(ribbonPath, color = Color(0xFFD0BCFF))
+        
+        // Sunglasses (Lenses & Bridge)
+        val lensY = h * 0.68f
+        val lensRadius = w * 0.12f
+        val leftLensCenterX = w * 0.36f
+        val rightLensCenterX = w * 0.64f
+        
+        // Left Lens
+        drawCircle(
+            color = Color.White,
+            radius = lensRadius,
+            center = androidx.compose.ui.geometry.Offset(leftLensCenterX, lensY)
+        )
+        // Right Lens
+        drawCircle(
+            color = Color.White,
+            radius = lensRadius,
+            center = androidx.compose.ui.geometry.Offset(rightLensCenterX, lensY)
+        )
+        
+        // Sunglasses Bridge
+        val bridgePath = Path().apply {
+            moveTo(leftLensCenterX + lensRadius * 0.6f, lensY - lensRadius * 0.2f)
+            quadraticTo(w * 0.5f, lensY - lensRadius * 0.5f, rightLensCenterX - lensRadius * 0.6f, lensY - lensRadius * 0.2f)
+            lineTo(rightLensCenterX - lensRadius * 0.6f, lensY + lensRadius * 0.1f)
+            quadraticTo(w * 0.5f, lensY - lensRadius * 0.2f, leftLensCenterX + lensRadius * 0.6f, lensY + lensRadius * 0.1f)
+            close()
+        }
+        drawPath(bridgePath, color = Color.White)
+    }
 }
 
 fun sanitizeJsStringResult(jsResult: String?): String {
@@ -1458,22 +1538,28 @@ fun DashboardScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = "IncogNav",
-                            color = ElegantLilac,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.SansSerif
-                        )
-                        Text(
-                            text = "CENTRO DE CONTROL",
-                            color = TextMuted,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp,
-                            fontFamily = FontFamily.SansSerif
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        IncogNavLogo(modifier = Modifier.size(36.dp))
+                        Column {
+                            Text(
+                                text = "IncogNav",
+                                color = ElegantLilac,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.SansSerif
+                            )
+                            Text(
+                                text = "CENTRO DE CONTROL",
+                                color = TextMuted,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp,
+                                fontFamily = FontFamily.SansSerif
+                            )
+                        }
                     }
                 },
                 navigationIcon = {

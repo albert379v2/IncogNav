@@ -184,6 +184,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun recordVisitedDomain(url: String) {
+        val activeId = _activeProfile.value?.id ?: return
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return
+        viewModelScope.launch {
+            val domainUrl = getDomainUrlOnly(url)
+            repository.addVisitedDomain(activeId, domainUrl)
+        }
+    }
+
     fun recordHistory(title: String, url: String) {
         val active = _activeProfile.value ?: return
         if (active.isIncognito) return // Do not record history for incognito sessions

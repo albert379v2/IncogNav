@@ -1,9 +1,12 @@
 package com.example.util
 
 import android.webkit.CookieManager
+import android.webkit.WebStorage
 import com.example.data.ProfileRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.suspendCoroutine
+import kotlin.coroutines.resume
 
 object CookieSyncHelper {
 
@@ -21,12 +24,16 @@ object CookieSyncHelper {
     }
 
     suspend fun restoreProfileCookies(profileId: Long, repository: ProfileRepository) = withContext(Dispatchers.Main) {
+        // Clear all local web storage per profile to completely seal data session isolation
+        WebStorage.getInstance().deleteAllData()
+
         val cookieManager = CookieManager.getInstance()
         
-        // Block and clear first
-        withContext(Dispatchers.IO) {
-            cookieManager.removeAllCookies(null)
-            cookieManager.flush()
+        // Remove existing cookies with a suspending clean routine
+        suspendCoroutine<Boolean> { continuation ->
+            cookieManager.removeAllCookies {
+                continuation.resume(true)
+            }
         }
         
         val savedCookies = withContext(Dispatchers.IO) {
@@ -34,11 +41,14 @@ object CookieSyncHelper {
         }
         
         for (savedCookie in savedCookies) {
-            cookieManager.setCookie(savedCookie.domain, savedCookie.cookieValue)
+            suspendCoroutine<Boolean> { continuation ->
+                cookieManager.setCookie(savedCookie.domain, savedCookie.cookieValue) {
+                    continuation.resume(true)
+                }
+            }
         }
         
-        withContext(Dispatchers.IO) {
-            cookieManager.flush()
-        }
+        // Flush changes to disk
+        cookieManager.flush()
     }
 }

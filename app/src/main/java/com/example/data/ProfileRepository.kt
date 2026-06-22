@@ -63,7 +63,10 @@ class ProfileRepository(private val profileDao: ProfileDao) {
     }
 
     suspend fun addVisitedDomain(profileId: Long, domainUrl: String) {
-        profileDao.insertVisitedDomain(ProfileVisitedDomain(profileId = profileId, domainUrl = domainUrl))
+        val existing = profileDao.getVisitedDomainsForProfile(profileId)
+        if (existing.none { it.domainUrl.equals(domainUrl, ignoreCase = true) }) {
+            profileDao.insertVisitedDomain(ProfileVisitedDomain(profileId = profileId, domainUrl = domainUrl))
+        }
     }
 
     suspend fun deleteVisitedDomainsForProfile(profileId: Long) {
