@@ -220,7 +220,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             }
             
             if (_activeProfile.value?.id == profile.id) {
-                val remaining = repository.allProfiles.first()
+                val remaining = repository.allProfiles.first().filter { it.id != profile.id }
                 if (remaining.isNotEmpty()) {
                     selectProfile(remaining.first().id)
                 } else {

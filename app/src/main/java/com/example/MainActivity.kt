@@ -61,6 +61,11 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private val viewModel: BrowserViewModel by viewModels()
+    private var currentWebView: java.lang.ref.WeakReference<WebView>? = null
+
+    fun registerWebView(webView: WebView) {
+        currentWebView = java.lang.ref.WeakReference(webView)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +84,28 @@ class MainActivity : ComponentActivity() {
             val url = viewModel.currentUrlText.value
             viewModel.saveProfileStateOffline(active.id, url)
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK) {
+            val active = viewModel.activeProfile.value
+            if (active != null) {
+                val webView = currentWebView?.get()
+                if (webView != null) {
+                    if (webView.canGoBack()) {
+                        webView.goBack()
+                        return true
+                    } else {
+                        webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
+                            val cleanJson = sanitizeJsStringResult(result)
+                            viewModel.closeActiveProfile(currentUrl = viewModel.currentUrlText.value, currentLocalStorageJson = cleanJson)
+                        }
+                        return true
+                    }
+                }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
     }
 }
 
@@ -110,10 +137,11 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
         }
     }
 
-    // Set user agent and start-of-document scripts whenever active Profile changes
+    // Set user agent, language and start-of-document scripts whenever active Profile changes
     LaunchedEffect(activeProfile) {
         activeProfile?.let { p ->
             webViewInstance?.let { webView ->
+                // User agent dynamic override
                 val targetUa = FingerprintSpoofer.getProfileUserAgent(p)
                 webView.settings.userAgentString = targetUa
 
@@ -478,6 +506,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                                 
                                 setupWebViewConfigurations(this, viewModel)
                                 webViewInstance = this
+                                (context as? MainActivity)?.registerWebView(this)
                                 
                                 // Load initial starting Url
                                 activeProfile?.let {
@@ -717,26 +746,11 @@ fun DrawerProfilePanel(
             }
 
             IconButton(
-                onClick = onCreateProfileClick,
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(BrightCyan)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add, 
-                    contentDescription = "Nuevo Perfil", 
-                    tint = PremiumVoid,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-
-            IconButton(
                 onClick = onCloseClick,
                 modifier = Modifier
                     .size(36.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF282531))
+                    .background(LightAccents)
             ) {
                 Icon(
                     imageVector = Icons.Default.Close, 
@@ -755,7 +769,32 @@ fun DrawerProfilePanel(
             fontSize = 11.sp
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Button(
+            onClick = onCreateProfileClick,
+            colors = ButtonDefaults.buttonColors(containerColor = BrightCyan),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Nuevo Perfil",
+                tint = PremiumVoid,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Crear Nuevo Perfil",
+                color = PremiumVoid,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
 
         Text(
             text = "Perfiles de Navegación",
@@ -1009,6 +1048,46 @@ fun DrawerProfilePanel(
                     }
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Ambient Dark/Light Theme Selector Row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(CardBackground)
+                .border(1.dp, CardBackground, RoundedCornerShape(14.dp))
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = if (com.example.ui.theme.ThemeState.isDarkMode) Icons.Default.DarkMode else Icons.Default.LightMode,
+                    contentDescription = "Tema",
+                    tint = BrightCyan,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Tema Oscuro / Claro",
+                    color = TextOffWhite,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Switch(
+                checked = com.example.ui.theme.ThemeState.isDarkMode,
+                onCheckedChange = { com.example.ui.theme.ThemeState.isDarkMode = it },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = BrightCyan,
+                    checkedTrackColor = BrightCyan.copy(alpha = 0.4f),
+                    uncheckedThumbColor = TextMuted,
+                    uncheckedTrackColor = LightAccents
+                )
+            )
         }
     }
 }
