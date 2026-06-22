@@ -3,6 +3,8 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.webkit.Profile
+import androidx.webkit.ProfileStore
 import androidx.webkit.ProxyConfig
 import androidx.webkit.ProxyController
 import androidx.webkit.WebViewFeature
@@ -291,6 +293,21 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun resetSession() {
         viewModelScope.launch {
             val active = _activeProfile.value ?: return@launch
+            
+            // If MULTI_PROFILE is natively supported, clear native profile cookies and webStorage data
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+                try {
+                    val profileStore = ProfileStore.getInstance()
+                    val webProfile = profileStore.getProfile("profile_${active.id}")
+                    if (webProfile != null) {
+                        webProfile.cookieManager.removeAllCookies(null)
+                        webProfile.webStorage.deleteAllData()
+                    }
+                } catch (e: java.lang.Exception) {
+                    android.util.Log.e("BrowserViewModel", "Error al resetear perfil nativo: ${e.message}", e)
+                }
+            }
+            
             repository.clearCookiesForProfile(active.id)
             CookieSyncHelper.restoreProfileCookies(active.id, repository)
             val updated = active.copy(localStorageJson = "{}")

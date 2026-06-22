@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.webkit.Profile
+import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.example.data.BrowserProfile
@@ -147,6 +149,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = false,
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = PremiumVoid,
@@ -417,48 +420,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                     }
                 }
             },
-            bottomBar = {
-                // Bottom stats ribbon styled with Elegant Dark MD3 bar background and safe area padding
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF211F26))
-                ) {
-                    HorizontalDivider(color = Color(0xFF49454F), thickness = 1.dp)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(if (activeProfile?.proxyType != "DIRECT") GlowGreen else TextMuted)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (activeProfile?.proxyType != "DIRECT") {
-                                    "Conectado vía ${activeProfile?.proxyType}: ${activeProfile?.proxyHost}"
-                                } else "Conexión Directa (Sin Proxy)",
-                                color = TextMuted,
-                                fontSize = 10.sp
-                            )
-                        }
-
-                        Text(
-                            text = "Antidetect: ${if (activeProfile?.canvasNoiseEnabled == true) "Activo" else "Básico"}",
-                            color = BrightCyan,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            },
+            bottomBar = {},
             containerColor = PremiumVoid
         ) { paddingValues ->
             Box(
@@ -467,27 +429,41 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                     .padding(paddingValues)
                     .background(PremiumVoid)
             ) {
-                AndroidView(
-                    factory = { context ->
-                        WebView(context).apply {
-                            layoutParams = android.view.ViewGroup.LayoutParams(
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            setupWebViewConfigurations(this, viewModel)
-                            webViewInstance = this
-                            
-                            // Load initial starting Url
-                            activeProfile?.let {
-                                loadUrl(it.lastVisitedUrl)
-                            } ?: loadUrl("https://www.google.com")
-                        }
-                    },
-                    update = {
-                        // Handled dynamically via triggers & launched effects to prevent reload on recreation
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                key(activeProfile?.id) {
+                    AndroidView(
+                        factory = { context ->
+                            WebView(context).apply {
+                                layoutParams = android.view.ViewGroup.LayoutParams(
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                
+                                // Initialize WebView with Android Chrome native isolated profile if supported (MULTI_PROFILE)
+                                if (activeProfile != null && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+                                    try {
+                                        val profileStore = ProfileStore.getInstance()
+                                        val webProfile = profileStore.getOrCreateProfile("profile_${activeProfile!!.id}")
+                                        WebViewCompat.setProfile(this, webProfile.name)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("IncogNav", "Error aplicando perfil nativo: ${e.message}", e)
+                                    }
+                                }
+                                
+                                setupWebViewConfigurations(this, viewModel)
+                                webViewInstance = this
+                                
+                                // Load initial starting Url
+                                activeProfile?.let {
+                                    loadUrl(it.lastVisitedUrl)
+                                } ?: loadUrl("https://www.google.com")
+                            }
+                        },
+                        update = {
+                            // Handled dynamically via triggers & launched effects to prevent reload on recreation
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }
@@ -906,6 +882,64 @@ fun DrawerProfilePanel(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Active Profile Connection / Antidetect details card inside drawer
+        activeProfile?.let { active ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFFEADDFF).copy(alpha = 0.05f))
+                    .border(1.dp, BrightCyan.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "ESTADO DE PERFIL ACTIVO",
+                        color = BrightCyan,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.SansSerif
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(if (active.proxyType != "DIRECT") GlowGreen else TextMuted)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (active.proxyType != "DIRECT") {
+                                "Conectado vía ${active.proxyType}: ${active.proxyHost}"
+                            } else "Conexión Directa (Sin Proxy)",
+                            color = TextOffWhite,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(if (active.canvasNoiseEnabled) GlowGreen else TextMuted)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Protección Antidetect: " + (if (active.canvasNoiseEnabled) "Completa" else "Básica"),
+                            color = TextOffWhite,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
         }
