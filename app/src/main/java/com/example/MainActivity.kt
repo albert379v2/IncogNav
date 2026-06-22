@@ -505,6 +505,18 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                                 }
                                 
                                 setupWebViewConfigurations(this, viewModel)
+                                
+                                // Set User-Agent and Start-of-Document scripting synchronously BEFORE loading URL
+                                activeProfile?.let { p ->
+                                    val targetUa = FingerprintSpoofer.getProfileUserAgent(p)
+                                    this.settings.userAgentString = targetUa
+                                    
+                                    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                                        val script = FingerprintSpoofer.getSpoofingScript(p)
+                                        WebViewCompat.addDocumentStartJavaScript(this, script, setOf("*"))
+                                    }
+                                }
+
                                 webViewInstance = this
                                 (context as? MainActivity)?.registerWebView(this)
                                 

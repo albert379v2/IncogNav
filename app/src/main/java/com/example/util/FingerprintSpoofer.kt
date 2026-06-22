@@ -42,18 +42,34 @@ object FingerprintSpoofer {
 
                 // Spoof Timezone
                 try {
-                   // This is complex, but overriding Intl.DateTimeFormat can help
-                   const NativeDate = Date;
-                   Date = function() {
-                       if (arguments.length > 0) return new NativeDate(...arguments);
-                       return new NativeDate();
-                   };
-                   Date.prototype = NativeDate.prototype;
-                   
-                   // Simplified way to influence timezone in Date display
-                   // We might need a better library for full timezone spoofing, 
-                   // but for basic web scenarios this helps.
-                } catch(e) { console.error(e); }
+                    const targetTimeZone = "$timezone";
+                    const nativeGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+                    
+                    Date.prototype.getTimezoneOffset = function() {
+                        try {
+                            const invdate = new Date(this.toLocaleString('en-US', { timeZone: targetTimeZone }));
+                            const diff = this.getTime() - invdate.getTime();
+                            return Math.round(diff / 60000);
+                        } catch(e) {
+                            return nativeGetTimezoneOffset.apply(this);
+                        }
+                    };
+
+                    const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
+                    Intl.DateTimeFormat.prototype.resolvedOptions = function() {
+                        const options = originalResolvedOptions.apply(this);
+                        options.timeZone = targetTimeZone;
+                        return options;
+                    };
+                } catch(e) { console.error("TimeZone spoofing error: ", e); }
+
+                // Block WebRTC leak to protect ISP and Local IP
+                try {
+                    Object.defineProperty(window, 'RTCPeerConnection', { value: undefined, writable: false, configurable: false });
+                    Object.defineProperty(window, 'webkitRTCPeerConnection', { value: undefined, writable: false, configurable: false });
+                    Object.defineProperty(window, 'mozRTCPeerConnection', { value: undefined, writable: false, configurable: false });
+                    Object.defineProperty(window, 'msRTCPeerConnection', { value: undefined, writable: false, configurable: false });
+                } catch(e) { console.error("WebRTC block error:", e); }
 
                 // Spoof Geolocation
                 try {
