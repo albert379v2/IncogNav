@@ -159,21 +159,28 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                     profiles = profiles,
                     activeProfile = activeProfile,
                     onSelectProfile = { id ->
-                        webViewInstance?.let { webView ->
-                            webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
-                                val cleanJson = sanitizeJsStringResult(result)
-                                viewModel.selectProfile(id, currentUrl = urlText, currentLocalStorageJson = cleanJson)
+                        if (activeProfile?.id == id) {
+                            scope.launch { drawerState.close() }
+                        } else {
+                            webViewInstance?.let { webView ->
+                                webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
+                                    val cleanJson = sanitizeJsStringResult(result)
+                                    viewModel.selectProfile(id, currentUrl = urlText, currentLocalStorageJson = cleanJson)
+                                }
+                            } ?: run {
+                                viewModel.selectProfile(id)
                             }
-                        } ?: run {
-                            viewModel.selectProfile(id)
+                            scope.launch { drawerState.close() }
                         }
-                        scope.launch { drawerState.close() }
                     },
                     onCreateProfileClick = {
                         showCreateProfileDialog = true
                     },
                     onDeleteProfileClick = { profile ->
                         viewModel.deleteProfile(profile)
+                    },
+                    onCloseClick = {
+                        scope.launch { drawerState.close() }
                     }
                 )
             }
@@ -648,7 +655,8 @@ fun DrawerProfilePanel(
     activeProfile: BrowserProfile?,
     onSelectProfile: (Long) -> Unit,
     onCreateProfileClick: () -> Unit,
-    onDeleteProfileClick: (BrowserProfile) -> Unit
+    onDeleteProfileClick: (BrowserProfile) -> Unit,
+    onCloseClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -663,7 +671,7 @@ fun DrawerProfilePanel(
                 .fillMaxWidth()
                 .padding(bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             IncogNavLogo(modifier = Modifier.size(48.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -686,7 +694,7 @@ fun DrawerProfilePanel(
             IconButton(
                 onClick = onCreateProfileClick,
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(36.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(BrightCyan)
             ) {
@@ -694,7 +702,22 @@ fun DrawerProfilePanel(
                     imageVector = Icons.Default.Add, 
                     contentDescription = "Nuevo Perfil", 
                     tint = PremiumVoid,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            IconButton(
+                onClick = onCloseClick,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF282531))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close, 
+                    contentDescription = "Cerrar", 
+                    tint = TextOffWhite,
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

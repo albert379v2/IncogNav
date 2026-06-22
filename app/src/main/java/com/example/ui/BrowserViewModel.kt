@@ -57,6 +57,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val oldProfile = _activeProfile.value
             if (oldProfile != null) {
+                if (oldProfile.id == profileId) {
+                    // It is the same profile! Just return and do absolutely nothing.
+                    return@launch
+                }
                 var updatedOld = oldProfile
                 if (currentUrl.isNotEmpty()) {
                     updatedOld = updatedOld.copy(lastVisitedUrl = currentUrl)
@@ -340,7 +344,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val proxyStr = "$prefix${profile.proxyHost}:${profile.proxyPort}"
         val proxyConfig = ProxyConfig.Builder()
             .addProxyRule(proxyStr)
-            .addDirect() // Allow direct fallback if unreachable
             .build()
 
         ProxyController.getInstance().setProxyOverride(
