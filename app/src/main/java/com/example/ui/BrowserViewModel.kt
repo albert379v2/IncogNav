@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
     private val repository = ProfileRepository(database.profileDao())
+    private val visitedDomainsCache = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     val allProfiles = repository.allProfiles
 
@@ -46,14 +47,24 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // Empty init to avoid auto-creating or auto-selecting a profile on startup.
     }
 
-    fun selectProfile(profileId: Long) {
+    fun selectProfile(
+        profileId: Long,
+        currentUrl: String = "",
+        currentLocalStorageJson: String? = null
+    ) {
         viewModelScope.launch {
             val oldProfile = _activeProfile.value
             if (oldProfile != null) {
-                // Save current URL path to profiles
-                if (currentUrlText.value.isNotEmpty()) {
-                    repository.updateProfile(oldProfile.copy(lastVisitedUrl = currentUrlText.value))
+                var updatedOld = oldProfile
+                if (currentUrl.isNotEmpty()) {
+                    updatedOld = updatedOld.copy(lastVisitedUrl = currentUrl)
                 }
+                if (currentLocalStorageJson != null) {
+                    updatedOld = updatedOld.copy(localStorageJson = currentLocalStorageJson)
+                }
+                // Save updated profile with latest localStorage and URL to database sequentially
+                repository.updateProfile(updatedOld)
+                
                 // Save active cookies before leaving
                 CookieSyncHelper.saveActiveCookies(oldProfile.id, repository)
             }
@@ -61,6 +72,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             val target = repository.getProfileById(profileId) ?: return@launch
             _activeProfile.value = target
             currentUrlText.value = target.lastVisitedUrl
+
+            // Initialize visited domains cache for the target profile
+            visitedDomainsCache.clear()
+            val domains = repository.getVisitedDomainsForProfile(target.id)
+            visitedDomainsCache.addAll(domains.map { it.domainUrl.lowercase() })
 
             // Synchronize room items flow
             viewModelScope.launch {
@@ -173,12 +189,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             val normalized = normalizeUrl(url)
             currentUrlText.value = normalized
             
-            val activeId = _activeProfile.value?.id
-            if (activeId != null) {
-                // Record domain for cookie syncing
-                val domainUrl = getDomainUrlOnly(normalized)
-                repository.addVisitedDomain(activeId, domainUrl)
-            }
+            recordVisitedDomain(normalized)
             
             _navigationTrigger.emit(normalized)
         }
@@ -187,9 +198,59 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun recordVisitedDomain(url: String) {
         val activeId = _activeProfile.value?.id ?: return
         if (!url.startsWith("http://") && !url.startsWith("https://")) return
+        val domainUrl = getDomainUrlOnly(url).lowercase()
+        if (domainUrl.isEmpty()) return
+
+        saveDomainIfNew(activeId, domainUrl)
+
+        // Also register base domain if it's a subdomain to capture session cookies set on the root domain
+        try {
+            val uri = java.net.URI(domainUrl)
+            val host = uri.host ?: return
+            val scheme = uri.scheme ?: "https"
+            val parts = host.split(".")
+            if (parts.size > 2) {
+                val baseHost = parts.takeLast(2).joinToString(".")
+                val baseDomain = "$scheme://$baseHost"
+                saveDomainIfNew(activeId, baseDomain)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun saveDomainIfNew(profileId: Long, domainUrl: String) {
+        if (!visitedDomainsCache.contains(domainUrl)) {
+            visitedDomainsCache.add(domainUrl)
+            viewModelScope.launch {
+                repository.addVisitedDomain(profileId, domainUrl)
+            }
+        }
+    }
+
+    fun saveCurrentUrl(url: String) {
+        val active = _activeProfile.value ?: return
+        if (active.lastVisitedUrl == url) return
         viewModelScope.launch {
-            val domainUrl = getDomainUrlOnly(url)
-            repository.addVisitedDomain(activeId, domainUrl)
+            val updated = active.copy(lastVisitedUrl = url)
+            repository.updateProfile(updated)
+            _activeProfile.value = updated
+        }
+    }
+
+    fun saveActiveCookiesExternal() {
+        val active = _activeProfile.value ?: return
+        viewModelScope.launch {
+            CookieSyncHelper.saveActiveCookies(active.id, repository)
+        }
+    }
+
+    fun saveProfileStateOffline(profileId: Long, currentUrl: String) {
+        viewModelScope.launch {
+            if (currentUrl.isNotEmpty()) {
+                repository.getProfileById(profileId)?.let { oldProfile ->
+                    repository.updateProfile(oldProfile.copy(lastVisitedUrl = currentUrl))
+                }
+            }
+            CookieSyncHelper.saveActiveCookies(profileId, repository)
         }
     }
 

@@ -68,6 +68,15 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onPause() {
+        super.onPause()
+        val active = viewModel.activeProfile.value
+        if (active != null) {
+            val url = viewModel.currentUrlText.value
+            viewModel.saveProfileStateOffline(active.id, url)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,6 +123,28 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
         }
     }
 
+    // Periodic Auto-Save (Every 8 seconds) for active profile cookies & localStorage
+    LaunchedEffect(activeProfile) {
+        if (activeProfile != null) {
+            while (true) {
+                kotlinx.coroutines.delay(8000)
+                val currentUrl = viewModel.currentUrlText.value
+                
+                if (currentUrl.isNotEmpty()) {
+                    viewModel.saveCurrentUrl(currentUrl)
+                }
+                viewModel.saveActiveCookiesExternal()
+                
+                webViewInstance?.let { webView ->
+                    webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
+                        val cleanJson = sanitizeJsStringResult(result)
+                        viewModel.updateActiveProfileLocalStorage(cleanJson)
+                    }
+                }
+            }
+        }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -128,8 +159,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                         webViewInstance?.let { webView ->
                             webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
                                 val cleanJson = sanitizeJsStringResult(result)
-                                viewModel.updateActiveProfileLocalStorage(cleanJson)
-                                viewModel.selectProfile(id)
+                                viewModel.selectProfile(id, currentUrl = urlText, currentLocalStorageJson = cleanJson)
                             }
                         } ?: run {
                             viewModel.selectProfile(id)
@@ -610,6 +640,13 @@ private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewM
                     val cleanJson = sanitizeJsStringResult(result)
                     viewModel.updateActiveProfileLocalStorage(cleanJson)
                 }
+            }
+        }
+
+        override fun onLoadResource(view: WebView?, url: String?) {
+            super.onLoadResource(view, url)
+            if (url != null) {
+                viewModel.recordVisitedDomain(url)
             }
         }
 
