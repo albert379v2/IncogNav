@@ -36,11 +36,34 @@ object FingerprintSpoofer {
             else -> "14.0.0"
         }
 
-        // Minified JS to spoof navigator parameters and Canvas/WebGL attributes
+        // Minified JS to spoof navigator parameters and Canvas/WebGL attributes with undetectability
         return """
             (function() {
                 if (window.__incognav_shield_installed__) return;
                 window.__incognav_shield_installed__ = true;
+
+                // Stealth wrapper helper to preserve Function.prototype.toString showing '[native code]'
+                const stealthWrap = (owner, funcName, wrapperFunc) => {
+                    try {
+                        const originalFunc = owner[funcName];
+                        if (!originalFunc) return;
+                        Object.defineProperty(owner, funcName, {
+                            value: wrapperFunc,
+                            configurable: true,
+                            writable: true
+                        });
+                        Object.defineProperty(wrapperFunc, 'toString', {
+                            value: function() {
+                                if (this === wrapperFunc) return "function " + funcName + "() { [native code] }";
+                                return Function.prototype.toString.call(this);
+                            },
+                            configurable: true,
+                            writable: true
+                        });
+                    } catch (e) {
+                        console.error("Failed stealth wrap on " + funcName, e);
+                    }
+                };
 
                 // Spoof navigator properties
                 try {
@@ -64,39 +87,40 @@ object FingerprintSpoofer {
                             brands: [
                                 { brand: 'Chromium', version: '124' },
                                 { brand: 'Google Chrome', version: '124' },
-                                { brand: 'Not-A.Brand', version: '99' }
+                                { brand: 'Not-A.Brand', version: '124' }
                             ],
                             mobile: isMobileVal,
-                            platform: pfVal,
-                            getHighEntropyValues: function(hints) {
-                                return new Promise((resolve) => {
-                                    const response = {
-                                        brands: [
-                                            { brand: 'Chromium', version: '124' },
-                                            { brand: 'Google Chrome', version: '124' },
-                                            { brand: 'Not-A.Brand', version: '99' }
-                                        ],
-                                        mobile: isMobileVal,
-                                        platform: pfVal,
-                                        architecture: pfVal === "Windows" ? "x86" : (pfVal === "macOS" ? "arm" : ""),
-                                        bitness: "64",
-                                        model: modelVal,
-                                        platformVersion: pfVerVal,
-                                        uaFullVersion: "124.0.0.0"
-                                    };
-                                    const result = {};
-                                    if (hints && Array.isArray(hints)) {
-                                        hints.forEach(hint => {
-                                            if (hint in response) result[hint] = response[hint];
-                                        });
-                                    }
-                                    resolve(Object.assign({}, response, result));
-                                });
-                            }
+                            platform: pfVal
                         };
-                        
+
                         Object.defineProperty(navigator, 'userAgentData', {
                             get: function() { return spoofedUserAgentData; }
+                        });
+
+                        stealthWrap(navigator.userAgentData, 'getHighEntropyValues', function(hints) {
+                            return new Promise((resolve) => {
+                                const response = {
+                                    brands: [
+                                        { brand: 'Chromium', version: '124' },
+                                        { brand: 'Google Chrome', version: '124' },
+                                        { brand: 'Not-A.Brand', version: '124' }
+                                    ],
+                                    mobile: isMobileVal,
+                                    platform: pfVal,
+                                    architecture: pfVal === "Windows" ? "x86" : (pfVal === "macOS" ? "arm" : ""),
+                                    bitness: "64",
+                                    model: modelVal,
+                                    platformVersion: pfVerVal,
+                                    uaFullVersion: "124.0.0.0"
+                                };
+                                const result = {};
+                                if (hints && Array.isArray(hints)) {
+                                    hints.forEach(hint => {
+                                        if (hint in response) result[hint] = response[hint];
+                                    });
+                                }
+                                resolve(Object.assign({}, response, result));
+                            });
                         });
                     }
                 } catch (e) {
@@ -108,7 +132,7 @@ object FingerprintSpoofer {
                     const targetTimeZone = "$timezone";
                     const nativeGetTimezoneOffset = Date.prototype.getTimezoneOffset;
                     
-                    Date.prototype.getTimezoneOffset = function() {
+                    stealthWrap(Date.prototype, 'getTimezoneOffset', function() {
                         try {
                             const invdate = new Date(this.toLocaleString('en-US', { timeZone: targetTimeZone }));
                             const diff = this.getTime() - invdate.getTime();
@@ -116,22 +140,58 @@ object FingerprintSpoofer {
                         } catch(e) {
                             return nativeGetTimezoneOffset.apply(this);
                         }
-                    };
+                    });
 
                     const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
-                    Intl.DateTimeFormat.prototype.resolvedOptions = function() {
+                    stealthWrap(Intl.DateTimeFormat.prototype, 'resolvedOptions', function() {
                         const options = originalResolvedOptions.apply(this);
                         options.timeZone = targetTimeZone;
                         return options;
-                    };
+                    });
                 } catch(e) { console.error("TimeZone spoofing error: ", e); }
 
-                // Block WebRTC leak to protect ISP and Local IP
+                // Protect ISP and Local IP leaks via fully-stealthy WebRTC wrappers
                 try {
-                    Object.defineProperty(window, 'RTCPeerConnection', { value: undefined, writable: false, configurable: false });
-                    Object.defineProperty(window, 'webkitRTCPeerConnection', { value: undefined, writable: false, configurable: false });
-                    Object.defineProperty(window, 'mozRTCPeerConnection', { value: undefined, writable: false, configurable: false });
-                    Object.defineProperty(window, 'msRTCPeerConnection', { value: undefined, writable: false, configurable: false });
+                    const origPC = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
+                    if (origPC) {
+                        const spoofedPC = function(config, constraints) {
+                            const pc = new origPC(config, constraints);
+                            
+                            let userIceCallback = null;
+                            Object.defineProperty(pc, 'onicecandidate', {
+                                get: function() { return userIceCallback; },
+                                set: function(cb) { userIceCallback = cb; }
+                            });
+                            
+                            pc.addEventListener('icecandidate', function(e) {
+                                e.stopImmediatePropagation();
+                            }, true);
+                            
+                            const origLocalDesc = Object.getOwnPropertyDescriptor(origPC.prototype, 'localDescription');
+                            if (origLocalDesc) {
+                                Object.defineProperty(pc, 'localDescription', {
+                                    get: function() {
+                                        const desc = origLocalDesc.get.call(this);
+                                        if (desc && desc.sdp) {
+                                            desc.sdp = desc.sdp.replace(/([0-9]{1,3}\.){3}[0-9]{1,3}/g, "0.0.0.0");
+                                        }
+                                        return desc;
+                                    }
+                                });
+                            }
+                            return pc;
+                        };
+                        
+                        spoofedPC.prototype = origPC.prototype;
+                        
+                        Object.defineProperty(spoofedPC, 'toString', {
+                            value: function() { return "function RTCPeerConnection() { [native code] }"; }
+                        });
+                        
+                        window.RTCPeerConnection = spoofedPC;
+                        if (window.webkitRTCPeerConnection) window.webkitRTCPeerConnection = spoofedPC;
+                        if (window.mozRTCPeerConnection) window.mozRTCPeerConnection = spoofedPC;
+                    }
                 } catch(e) { console.error("WebRTC block error:", e); }
 
                 // Spoof Geolocation
@@ -146,15 +206,12 @@ object FingerprintSpoofer {
                         speed: null
                     };
 
-                    Object.defineProperty(navigator.geolocation, 'getCurrentPosition', {
-                        value: function(success, error, options) {
-                            success({ coords: spoofedCoords, timestamp: Date.now() });
-                        }
+                    stealthWrap(navigator.geolocation, 'getCurrentPosition', function(success, error, options) {
+                        success({ coords: spoofedCoords, timestamp: Date.now() });
                     });
-                    Object.defineProperty(navigator.geolocation, 'watchPosition', {
-                        value: function(success, error, options) {
-                            return 1; // Return a dummy watch ID
-                        }
+                    stealthWrap(navigator.geolocation, 'watchPosition', function(success, error, options) {
+                        success({ coords: spoofedCoords, timestamp: Date.now() });
+                        return 1;
                     });
                 } catch(e) { console.error("Geo spoofing:", e); }
 
@@ -162,28 +219,26 @@ object FingerprintSpoofer {
                 if ($canvasNoise) {
                     try {
                         const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-                        HTMLCanvasElement.prototype.toDataURL = function() {
+                        stealthWrap(HTMLCanvasElement.prototype, 'toDataURL', function() {
                             const ctx = this.getContext('2d');
                             if (ctx) {
-                                // Microscopic invisible noise injection
                                 const oldStyle = ctx.fillStyle;
                                 ctx.fillStyle = "rgba(255,255,255,0.005)";
                                 ctx.fillRect(Math.random() * 5, Math.random() * 5, 1, 1);
                                 ctx.fillStyle = oldStyle;
                             }
                             return originalToDataURL.apply(this, arguments);
-                        };
+                        });
 
                         const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-                        CanvasRenderingContext2D.prototype.getImageData = function(sx, sy, sw, sh) {
+                        stealthWrap(CanvasRenderingContext2D.prototype, 'getImageData', function() {
                             const imageData = originalGetImageData.apply(this, arguments);
                             const len = imageData.data.length;
                             if (len > 4) {
-                                // Slightly slide a pixel color channel secretly
                                 imageData.data[len - 4] = (imageData.data[len - 4] + 1) % 256;
                             }
                             return imageData;
-                        };
+                        });
                     } catch (e) {
                         console.error("Canvas spoofing failed: ", e);
                     }
@@ -193,20 +248,19 @@ object FingerprintSpoofer {
                 if ($webglSpoof) {
                     try {
                         const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
-                        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                            // UNMASKED_VENDOR_WEBGL_EXT (0x9245) or UNMASKED_RENDERER_WEBGL_EXT (0x9246)
+                        stealthWrap(WebGLRenderingContext.prototype, 'getParameter', function(parameter) {
                             if (parameter === 37445) return "$webglVendor"; 
                             if (parameter === 37446) return "$webglRenderer";
                             return originalGetParameter.apply(this, arguments);
-                        };
+                        });
 
                         if (window.WebGL2RenderingContext) {
                             const originalGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
-                            WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+                            stealthWrap(WebGL2RenderingContext.prototype, 'getParameter', function(parameter) {
                                 if (parameter === 37445) return "$webglVendor";
                                 if (parameter === 37446) return "$webglRenderer";
                                 return originalGetParameter2.apply(this, arguments);
-                            };
+                            });
                         }
                     } catch (e) {
                         console.error("WebGL spoofing failed: ", e);
