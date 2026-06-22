@@ -794,6 +794,31 @@ fun DrawerProfilePanel(
             )
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Global Clear Cache & Purge button moved here for better space utilization
+        Button(
+            onClick = onClearCacheClick,
+            colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, BrightCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Limpiar Caché Global",
+                tint = BrightCyan,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Limpiar Caché Global",
+                color = BrightCyan,
+                fontSize = 14.sp
+            )
+        }
+
         Spacer(modifier = Modifier.height(18.dp))
 
         Text(
@@ -973,26 +998,7 @@ fun DrawerProfilePanel(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Global Clear Cache & Purge button inside drawer
-        Button(
-            onClick = onClearCacheClick,
-            colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, BrightCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Limpiar Caché Global",
-                tint = BrightCyan,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Limpiar Caché Global", color = TextOffWhite, fontSize = 12.sp)
-        }
 
-        Spacer(modifier = Modifier.height(12.dp))
 
         // Active Profile Connection / Antidetect details card inside drawer
         activeProfile?.let { active ->
