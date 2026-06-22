@@ -143,12 +143,18 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
             webViewInstance?.let { webView ->
                 // User agent dynamic override
                 val targetUa = FingerprintSpoofer.getProfileUserAgent(p)
-                webView.settings.userAgentString = targetUa
+                if (targetUa == "Default" || targetUa.isEmpty()) {
+                    webView.settings.userAgentString = null // Resets to system default 100% genuine User Agent!
+                } else {
+                    webView.settings.userAgentString = targetUa
+                }
 
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                     val script = FingerprintSpoofer.getSpoofingScript(p)
-                    // Allowed rules set for all origins to enable global antidetect spoofing
-                    WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+                    if (script.isNotEmpty()) {
+                        // Allowed rules set for all origins to enable global antidetect spoofing
+                        WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+                    }
                 }
             }
         }
@@ -509,11 +515,17 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                                 // Set User-Agent and Start-of-Document scripting synchronously BEFORE loading URL
                                 activeProfile?.let { p ->
                                     val targetUa = FingerprintSpoofer.getProfileUserAgent(p)
-                                    this.settings.userAgentString = targetUa
+                                    if (targetUa == "Default" || targetUa.isEmpty()) {
+                                        this.settings.userAgentString = null
+                                    } else {
+                                        this.settings.userAgentString = targetUa
+                                    }
                                     
                                     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                                         val script = FingerprintSpoofer.getSpoofingScript(p)
-                                        WebViewCompat.addDocumentStartJavaScript(this, script, setOf("*"))
+                                        if (script.isNotEmpty()) {
+                                             WebViewCompat.addDocumentStartJavaScript(this, script, setOf("*"))
+                                         }
                                     }
                                 }
 
@@ -651,7 +663,9 @@ private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewM
                 }
 
                 val script = FingerprintSpoofer.getSpoofingScript(p)
-                view?.evaluateJavascript(script, null)
+                if (script.isNotEmpty()) {
+                    view?.evaluateJavascript(script, null)
+                }
             }
         }
 
@@ -1136,12 +1150,12 @@ fun CreateProfileDialog(
     var proxyUser by remember { mutableStateOf("") }
     var proxyPass by remember { mutableStateOf("") }
     var isIncognito by remember { mutableStateOf(false) }
-    var canvasNoise by remember { mutableStateOf(true) }
-    var webglSpoof by remember { mutableStateOf(true) }
+    var canvasNoise by remember { mutableStateOf(false) }
+    var webglSpoof by remember { mutableStateOf(false) }
     var platform by remember { mutableStateOf("Default") }
     var languages by remember { mutableStateOf("Default") }
 
-    val userAgentOptions = listOf("Default", "Chrome Desktop", "Safari Mac", "Chrome Mobile", "Safari iPhone", "Custom")
+    val userAgentOptions = listOf("Default", "Chrome Mobile", "Safari iPhone", "Firefox Mobile", "Edge Mobile", "Chrome Desktop", "Safari Mac", "Custom")
     val proxyOptions = listOf("DIRECT", "HTTP", "HTTPS", "SOCKS4", "SOCKS5")
     val platformOptions = listOf("Default", "Win32", "MacIntel", "iPhone", "Linux armv8l")
 

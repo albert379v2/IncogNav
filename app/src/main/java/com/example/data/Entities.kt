@@ -17,12 +17,12 @@ data class BrowserProfile(
     val proxyPass: String = "",
     val isIncognito: Boolean = false,
     val lastVisitedUrl: String = "https://www.google.com",
-    val canvasNoiseEnabled: Boolean = true,
-    val webGlSpoofEnabled: Boolean = true,
+    val canvasNoiseEnabled: Boolean = false,
+    val webGlSpoofEnabled: Boolean = false,
     val spoofedPlatform: String = "Default", // Default, Win32, MacIntel, iPhone, Linux armv8l
     val spoofedLanguages: String = "Default", // Default, e.g., "es-MX,es;q=0.9,en;q=0.8"
-    val spoofedTimezone: String = "Asia/Tokyo",
-    val spoofedGeolocation: String = "35.6762,139.6503",
+    val spoofedTimezone: String = "Default",
+    val spoofedGeolocation: String = "Default",
     val localStorageJson: String = "{}"
 )
 
