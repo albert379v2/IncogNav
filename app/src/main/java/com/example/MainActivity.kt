@@ -456,9 +456,40 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
 
                             // Cookie extraction and copy button
                             IconButton(onClick = {
-                                if (urlText.isNotEmpty()) {
+                                val activeUrl = (webViewInstance?.url ?: urlText).trim()
+                                if (activeUrl.isNotEmpty()) {
                                     val cookieManager = android.webkit.CookieManager.getInstance()
-                                    val cookies = cookieManager.getCookie(urlText)
+                                    // Make sure we have latest cookies flushed
+                                    cookieManager.flush()
+                                    
+                                    // Try different variants of the URL to get all cookies
+                                    var cookies = cookieManager.getCookie(activeUrl)
+                                    
+                                    if (cookies.isNullOrEmpty()) {
+                                        // Try with urlText if it's different
+                                        if (urlText.isNotEmpty() && urlText != activeUrl) {
+                                            cookies = cookieManager.getCookie(urlText)
+                                        }
+                                    }
+                                    
+                                    if (cookies.isNullOrEmpty()) {
+                                        // Try with base domains
+                                        try {
+                                            val uri = android.net.Uri.parse(activeUrl)
+                                            val host = uri.host
+                                            if (host != null) {
+                                                val scheme = uri.scheme ?: "https"
+                                                cookies = cookieManager.getCookie("$scheme://$host")
+                                                if (cookies.isNullOrEmpty() && host.startsWith("www.")) {
+                                                    val nonWwwHost = host.removePrefix("www.")
+                                                    cookies = cookieManager.getCookie("$scheme://$nonWwwHost")
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("IncogNav", "Error parsing URI for cookies", e)
+                                        }
+                                    }
+                                    
                                     if (!cookies.isNullOrEmpty()) {
                                         clipboardManager.setText(AnnotatedString(cookies))
                                         Toast.makeText(context, "Cookies copiadas al portapapeles 🍪", Toast.LENGTH_SHORT).show()
@@ -641,6 +672,11 @@ private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewM
 
     // Cache settings
     settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+    // Explicitly configure cookie manager for this WebView instance
+    val cookieManager = android.webkit.CookieManager.getInstance()
+    cookieManager.setAcceptCookie(true)
+    cookieManager.setAcceptThirdPartyCookies(webView, true)
 
     webView.webChromeClient = object : WebChromeClient() {
         override fun onProgressChanged(view: WebView?, newProgress: Int) {
