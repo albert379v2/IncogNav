@@ -38,6 +38,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import android.widget.Toast
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -183,6 +186,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
     }
 
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -450,13 +454,24 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                                 Icon(Icons.Default.History, contentDescription = "History Log", tint = TextOffWhite, modifier = Modifier.size(18.dp))
                             }
 
-                            // Active protection shield metrics trigger
-                            IconButton(onClick = { showProtectionShieldDialog = true }) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "Protección Antidetect",
-                                    tint = GlowGreen,
-                                    modifier = Modifier.size(18.dp)
+                            // Cookie extraction and copy button
+                            IconButton(onClick = {
+                                if (urlText.isNotEmpty()) {
+                                    val cookieManager = android.webkit.CookieManager.getInstance()
+                                    val cookies = cookieManager.getCookie(urlText)
+                                    if (!cookies.isNullOrEmpty()) {
+                                        clipboardManager.setText(AnnotatedString(cookies))
+                                        Toast.makeText(context, "Cookies copiadas al portapapeles 🍪", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "No hay cookies para esta página", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Ninguna página cargada", Toast.LENGTH_SHORT).show()
+                                }
+                            }) {
+                                Text(
+                                    text = "🍪",
+                                    fontSize = 18.sp
                                 )
                             }
                         }
