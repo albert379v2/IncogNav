@@ -10,9 +10,24 @@ import kotlin.coroutines.resume
 
 object CookieSyncHelper {
 
+    fun getCookieManager(profileId: Long?): CookieManager {
+        if (profileId != null && androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)) {
+            try {
+                val profileStore = androidx.webkit.ProfileStore.getInstance()
+                val webProfile = profileStore.getProfile("profile_$profileId")
+                if (webProfile != null) {
+                    return webProfile.cookieManager
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("CookieSyncHelper", "Error getting multi-profile cookie manager: ${e.message}", e)
+            }
+        }
+        return CookieManager.getInstance()
+    }
+
     suspend fun saveActiveCookies(profileId: Long, repository: ProfileRepository) = withContext(Dispatchers.IO) {
         val visitedDomains = repository.getVisitedDomainsForProfile(profileId)
-        val cookieManager = CookieManager.getInstance()
+        val cookieManager = getCookieManager(profileId)
         
         for (visitedDomain in visitedDomains) {
             val url = visitedDomain.domainUrl
@@ -25,9 +40,21 @@ object CookieSyncHelper {
 
     suspend fun restoreProfileCookies(profileId: Long, repository: ProfileRepository) = withContext(Dispatchers.Main) {
         // Clear all local web storage per profile to completely seal data session isolation
-        WebStorage.getInstance().deleteAllData()
+        if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)) {
+            try {
+                val profileStore = androidx.webkit.ProfileStore.getInstance()
+                val webProfile = profileStore.getProfile("profile_$profileId")
+                if (webProfile != null) {
+                    webProfile.webStorage.deleteAllData()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("CookieSyncHelper", "Error deleting multi-profile storage: ${e.message}", e)
+            }
+        } else {
+            WebStorage.getInstance().deleteAllData()
+        }
 
-        val cookieManager = CookieManager.getInstance()
+        val cookieManager = getCookieManager(profileId)
         
         // Remove existing cookies with a suspending clean routine
         suspendCoroutine<Boolean> { continuation ->
@@ -52,3 +79,4 @@ object CookieSyncHelper {
         cookieManager.flush()
     }
 }
+

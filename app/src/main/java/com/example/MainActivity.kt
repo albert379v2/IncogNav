@@ -58,6 +58,7 @@ import com.example.data.ProfileHistory
 import com.example.ui.BrowserViewModel
 import com.example.ui.theme.*
 import com.example.util.FingerprintSpoofer
+import com.example.util.CookieSyncHelper
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -458,7 +459,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                             IconButton(onClick = {
                                 val activeUrl = (webViewInstance?.url ?: urlText).trim()
                                 if (activeUrl.isNotEmpty()) {
-                                    val cookieManager = android.webkit.CookieManager.getInstance()
+                                    val cookieManager = CookieSyncHelper.getCookieManager(activeProfile?.id)
                                     // Make sure we have latest cookies flushed
                                     cookieManager.flush()
                                     
@@ -674,7 +675,7 @@ private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewM
     settings.cacheMode = WebSettings.LOAD_DEFAULT
 
     // Explicitly configure cookie manager for this WebView instance
-    val cookieManager = android.webkit.CookieManager.getInstance()
+    val cookieManager = CookieSyncHelper.getCookieManager(viewModel.activeProfile.value?.id)
     cookieManager.setAcceptCookie(true)
     cookieManager.setAcceptThirdPartyCookies(webView, true)
 
