@@ -39,20 +39,16 @@ object CookieSyncHelper {
     }
 
     suspend fun restoreProfileCookies(profileId: Long, repository: ProfileRepository) = withContext(Dispatchers.Main) {
-        // Clear all local web storage per profile to completely seal data session isolation
+        // If MULTI_PROFILE is supported, the native WebView profile already isolates and maintains
+        // its own cookies, localStorage, sessionStore, and indexedDB natively on disk.
+        // We must NOT wipe or override them on profile loading, otherwise we destroy session persistence.
         if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)) {
-            try {
-                val profileStore = androidx.webkit.ProfileStore.getInstance()
-                val webProfile = profileStore.getProfile("profile_$profileId")
-                if (webProfile != null) {
-                    webProfile.webStorage.deleteAllData()
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("CookieSyncHelper", "Error deleting multi-profile storage: ${e.message}", e)
-            }
-        } else {
-            WebStorage.getInstance().deleteAllData()
+            return@withContext
         }
+
+        // Below is the fallback routine for older Android devices without MULTI_PROFILE support
+        // Clear all local web storage per profile to completely seal data session isolation
+        WebStorage.getInstance().deleteAllData()
 
         val cookieManager = getCookieManager(profileId)
         
