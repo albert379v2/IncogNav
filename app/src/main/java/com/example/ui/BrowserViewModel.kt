@@ -65,11 +65,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 if (currentUrl.isNotEmpty()) {
                     updatedOld = updatedOld.copy(lastVisitedUrl = currentUrl)
                 }
-                if (currentLocalStorageJson != null) {
-                    updatedOld = updatedOld.copy(localStorageJson = currentLocalStorageJson)
-                }
-                // Save updated profile with latest localStorage and URL to database sequentially
+                // Save updated profile sequentially
                 repository.updateProfile(updatedOld)
+                
+                if (currentUrl.isNotEmpty() && currentLocalStorageJson != null) {
+                    val domainUrl = getDomainUrlOnly(currentUrl)
+                    repository.saveLocalStorage(oldProfile.id, domainUrl, currentLocalStorageJson)
+                }
                 
                 // Save active cookies before leaving
                 CookieSyncHelper.saveActiveCookies(oldProfile.id, repository)
@@ -118,10 +120,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 if (currentUrl.isNotEmpty()) {
                     updatedOld = updatedOld.copy(lastVisitedUrl = currentUrl)
                 }
-                if (currentLocalStorageJson != null) {
-                    updatedOld = updatedOld.copy(localStorageJson = currentLocalStorageJson)
-                }
                 repository.updateProfile(updatedOld)
+                
+                if (currentUrl.isNotEmpty() && currentLocalStorageJson != null) {
+                    val domainUrl = getDomainUrlOnly(currentUrl)
+                    repository.saveLocalStorage(oldProfile.id, domainUrl, currentLocalStorageJson)
+                }
                 CookieSyncHelper.saveActiveCookies(oldProfile.id, repository)
             }
             _activeProfile.value = null
@@ -196,14 +200,17 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun updateActiveProfileLocalStorage(json: String) {
+    fun saveActiveProfileLocalStorageForDomain(url: String, json: String) {
         val active = _activeProfile.value ?: return
-        if (active.localStorageJson == json) return
+        if (url.isEmpty()) return
+        val domainUrl = getDomainUrlOnly(url)
         viewModelScope.launch {
-            val updated = active.copy(localStorageJson = json)
-            repository.updateProfile(updated)
-            _activeProfile.value = updated
+            repository.saveLocalStorage(active.id, domainUrl, json)
         }
+    }
+
+    suspend fun getLocalStorage(profileId: Long, domain: String): String? {
+        return repository.getLocalStorage(profileId, domain)
     }
 
     fun deleteProfile(profile: BrowserProfile) {
@@ -212,6 +219,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             repository.clearCookiesForProfile(profile.id)
             repository.deleteHistory(profile.id)
             repository.deleteVisitedDomainsForProfile(profile.id)
+            repository.deleteLocalStorageForProfile(profile.id)
             
             // Automatically clear temporary caches to keep storage slim on profile deletion
             try {
@@ -359,6 +367,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             
             repository.clearCookiesForProfile(active.id)
             CookieSyncHelper.restoreProfileCookies(active.id, repository)
+            repository.deleteLocalStorageForProfile(active.id)
             val updated = active.copy(localStorageJson = "{}")
             repository.updateProfile(updated)
             _activeProfile.value = updated

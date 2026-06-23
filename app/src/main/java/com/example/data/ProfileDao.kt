@@ -58,4 +58,13 @@ interface ProfileDao {
 
     @Query("DELETE FROM profile_visited_domains WHERE profileId = :profileId")
     suspend fun deleteVisitedDomainsForProfile(profileId: Long)
+
+    @Query("SELECT localStorageJson FROM profile_local_storage WHERE profileId = :profileId AND domain = :domain")
+    suspend fun getLocalStorage(profileId: Long, domain: String): String?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLocalStorage(storage: ProfileLocalStorage)
+
+    @Query("DELETE FROM profile_local_storage WHERE profileId = :profileId")
+    suspend fun deleteLocalStorageForProfile(profileId: Long)
 }

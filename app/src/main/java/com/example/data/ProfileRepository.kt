@@ -72,4 +72,20 @@ class ProfileRepository(private val profileDao: ProfileDao) {
     suspend fun deleteVisitedDomainsForProfile(profileId: Long) {
         profileDao.deleteVisitedDomainsForProfile(profileId)
     }
+
+    suspend fun getLocalStorage(profileId: Long, domain: String): String? {
+        return profileDao.getLocalStorage(profileId, domain)
+    }
+
+    suspend fun saveLocalStorage(profileId: Long, domain: String, value: String) {
+        if (value.length > 1500000) {
+            android.util.Log.e("IncogNav", "Local storage data for $domain exceeds safe size limit (1.5MB). Skipping save to avoid DB crash.")
+            return
+        }
+        profileDao.insertLocalStorage(ProfileLocalStorage(profileId = profileId, domain = domain, localStorageJson = value))
+    }
+
+    suspend fun deleteLocalStorageForProfile(profileId: Long) {
+        profileDao.deleteLocalStorageForProfile(profileId)
+    }
 }

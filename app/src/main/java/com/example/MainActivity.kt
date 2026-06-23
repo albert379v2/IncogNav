@@ -169,13 +169,13 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                 
                 if (currentUrl.isNotEmpty()) {
                     viewModel.saveCurrentUrl(currentUrl)
-                }
-                viewModel.saveActiveCookiesExternal()
-                
-                webViewInstance?.let { webView ->
-                    webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
-                        val cleanJson = sanitizeJsStringResult(result)
-                        viewModel.updateActiveProfileLocalStorage(cleanJson)
+                    viewModel.saveActiveCookiesExternal()
+                    
+                    webViewInstance?.let { webView ->
+                        webView.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
+                            val cleanJson = sanitizeJsStringResult(result)
+                            viewModel.saveActiveProfileLocalStorageForDomain(currentUrl, cleanJson)
+                        }
                     }
                 }
             }
@@ -510,7 +510,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                                     }
                                 }
                                 
-                                setupWebViewConfigurations(this, viewModel)
+                                setupWebViewConfigurations(this, viewModel, scope)
                                 
                                 // Set User-Agent and Start-of-Document scripting synchronously BEFORE loading URL
                                 activeProfile?.let { p ->
@@ -610,7 +610,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewModel) {
+private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewModel, scope: kotlinx.coroutines.CoroutineScope) {
     val settings = webView.settings
     settings.javaScriptEnabled = true
     settings.domStorageEnabled = true
@@ -645,21 +645,26 @@ private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewM
 
             // Document start injection fallback
             viewModel.activeProfile.value?.let { p ->
-                // Pre-load stored isolated localStorage values if present
-                if (p.localStorageJson.isNotEmpty() && p.localStorageJson != "{}") {
-                    val storageScript = """
-                        (function() {
-                            try {
-                                const localData = ${p.localStorageJson};
-                                for (const key in localData) {
-                                    localStorage.setItem(key, localData[key]);
-                                }
-                            } catch (e) {
-                                console.error("localStorage preload injection failed", e);
-                            }
-                        })();
-                    """.trimIndent()
-                    view?.evaluateJavascript(storageScript, null)
+                if (url != null) {
+                    val domainUrl = viewModel.getDomainUrlOnly(url)
+                    scope.launch {
+                        val localDataJson = viewModel.getLocalStorage(p.id, domainUrl)
+                        if (!localDataJson.isNullOrEmpty() && localDataJson != "{}") {
+                            val storageScript = """
+                                (function() {
+                                    try {
+                                        const localData = $localDataJson;
+                                        for (const key in localData) {
+                                            localStorage.setItem(key, localData[key]);
+                                        }
+                                    } catch (e) {
+                                        console.error("localStorage preload injection failed", e);
+                                    }
+                                })();
+                            """.trimIndent()
+                            view?.evaluateJavascript(storageScript, null)
+                        }
+                    }
                 }
 
                 val script = FingerprintSpoofer.getSpoofingScript(p)
@@ -680,27 +685,31 @@ private fun setupWebViewConfigurations(webView: WebView, viewModel: BrowserViewM
 
                 // Inject finished-loading local storage check
                 viewModel.activeProfile.value?.let { p ->
-                    if (p.localStorageJson.isNotEmpty() && p.localStorageJson != "{}") {
-                        val storageScript = """
-                            (function() {
-                                try {
-                                    const localData = ${p.localStorageJson};
-                                    for (const key in localData) {
-                                        localStorage.setItem(key, localData[key]);
+                    val domainUrl = viewModel.getDomainUrlOnly(url)
+                    scope.launch {
+                        val localDataJson = viewModel.getLocalStorage(p.id, domainUrl)
+                        if (!localDataJson.isNullOrEmpty() && localDataJson != "{}") {
+                            val storageScript = """
+                                (function() {
+                                    try {
+                                        const localData = $localDataJson;
+                                        for (const key in localData) {
+                                            localStorage.setItem(key, localData[key]);
+                                        }
+                                    } catch (e) {
+                                        console.error("localStorage postload injection failed", e);
                                     }
-                                } catch (e) {
-                                    console.error("localStorage postload injection failed", e);
-                                }
-                            })();
-                        """.trimIndent()
-                        view?.evaluateJavascript(storageScript, null)
+                                })();
+                            """.trimIndent()
+                                view?.evaluateJavascript(storageScript, null)
+                        }
                     }
                 }
 
                 // Retrieve the updated localStorage and persist it
                 view?.evaluateJavascript("(function(){try{return JSON.stringify(localStorage);}catch(e){return '{}';}})()") { result ->
                     val cleanJson = sanitizeJsStringResult(result)
-                    viewModel.updateActiveProfileLocalStorage(cleanJson)
+                    viewModel.saveActiveProfileLocalStorageForDomain(url, cleanJson)
                 }
             }
         }

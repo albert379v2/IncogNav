@@ -57,3 +57,10 @@ data class ProfileVisitedDomain(
     val profileId: Long,
     val domainUrl: String // Store domain URL to retrieve cookies (e.g. "https://domain.com")
 )
+
+@Entity(tableName = "profile_local_storage", primaryKeys = ["profileId", "domain"])
+data class ProfileLocalStorage(
+    val profileId: Long,
+    val domain: String,
+    val localStorageJson: String
+)
