@@ -67,4 +67,22 @@ interface ProfileDao {
 
     @Query("DELETE FROM profile_local_storage WHERE profileId = :profileId")
     suspend fun deleteLocalStorageForProfile(profileId: Long)
+
+    @Query("SELECT * FROM proxy_bank ORDER BY id DESC")
+    fun getAllProxies(): Flow<List<ProxyBankItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertProxy(proxy: ProxyBankItem): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertProxies(proxies: List<ProxyBankItem>)
+
+    @Update
+    suspend fun updateProxy(proxy: ProxyBankItem)
+
+    @Delete
+    suspend fun deleteProxy(proxy: ProxyBankItem)
+
+    @Query("DELETE FROM proxy_bank")
+    suspend fun clearProxyBank()
 }

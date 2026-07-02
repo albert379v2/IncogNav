@@ -64,3 +64,16 @@ data class ProfileLocalStorage(
     val domain: String,
     val localStorageJson: String
 )
+
+@Entity(tableName = "proxy_bank")
+data class ProxyBankItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val type: String, // HTTP, HTTPS, SOCKS4, SOCKS5
+    val host: String,
+    val port: Int,
+    val user: String = "",
+    val pass: String = "",
+    val label: String = "",
+    val isWorking: Boolean? = null, // null = untested, true = working, false = failed
+    val latencyMs: Long = 0
+)

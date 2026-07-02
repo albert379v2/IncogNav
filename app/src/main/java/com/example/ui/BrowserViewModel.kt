@@ -65,6 +65,145 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             initialValue = emptyList()
         )
 
+    val allProxies = repository.allProxies.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    fun addProxy(type: String, host: String, port: Int, user: String = "", pass: String = "", label: String = "") {
+        viewModelScope.launch {
+            val finalLabel = if (label.isEmpty()) "$type://$host:$port" else label
+            repository.insertProxy(
+                ProxyBankItem(
+                    type = type,
+                    host = host,
+                    port = port,
+                    user = user,
+                    pass = pass,
+                    label = finalLabel
+                )
+            )
+        }
+    }
+
+    fun addProxiesBulk(text: String, defaultType: String = "HTTP") {
+        viewModelScope.launch {
+            val parsed = parseBulkProxies(text, defaultType)
+            if (parsed.isNotEmpty()) {
+                repository.insertProxies(parsed)
+            }
+        }
+    }
+
+    fun deleteProxy(proxy: ProxyBankItem) {
+        viewModelScope.launch {
+            repository.deleteProxy(proxy)
+        }
+    }
+
+    fun updateProxy(proxy: ProxyBankItem) {
+        viewModelScope.launch {
+            repository.updateProxy(proxy)
+        }
+    }
+
+    fun clearProxyBank() {
+        viewModelScope.launch {
+            repository.clearProxyBank()
+        }
+    }
+
+    fun testProxy(proxy: ProxyBankItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val startTime = System.currentTimeMillis()
+            var working = false
+            try {
+                val socketAddress = java.net.InetSocketAddress(proxy.host, proxy.port)
+                val socket = java.net.Socket()
+                socket.connect(socketAddress, 3000) // 3 seconds timeout
+                socket.close()
+                working = true
+            } catch (e: Exception) {
+                working = false
+            }
+            val duration = System.currentTimeMillis() - startTime
+            repository.updateProxy(
+                proxy.copy(
+                    isWorking = working,
+                    latencyMs = if (working) duration else 0L
+                )
+            )
+        }
+    }
+
+    private fun parseBulkProxies(text: String, defaultType: String): List<ProxyBankItem> {
+        val lines = text.split("\n")
+        val parsedList = mutableListOf<ProxyBankItem>()
+        for (rawLine in lines) {
+            val line = rawLine.trim()
+            if (line.isEmpty() || line.startsWith("#") || line.startsWith("//")) continue
+            
+            try {
+                var protocol = defaultType
+                var remaining = line
+                
+                // Check for protocol prefix, e.g. socks5:// or http://
+                if (line.contains("://")) {
+                    val parts = line.split("://", limit = 2)
+                    val proto = parts[0].trim().uppercase()
+                    if (proto == "HTTP" || proto == "HTTPS" || proto == "SOCKS4" || proto == "SOCKS5") {
+                        protocol = proto
+                    }
+                    remaining = parts[1].trim()
+                }
+                
+                // Check for user:pass@host:port format
+                var user = ""
+                var pass = ""
+                if (remaining.contains("@")) {
+                    val parts = remaining.split("@", limit = 2)
+                    val credentials = parts[0].trim()
+                    remaining = parts[1].trim()
+                    if (credentials.contains(":")) {
+                        val credParts = credentials.split(":", limit = 2)
+                        user = credParts[0].trim()
+                        pass = credParts[1].trim()
+                    } else {
+                        user = credentials
+                    }
+                }
+                
+                // Now handle host:port or host:port:user:pass
+                val tokenParts = remaining.split(":")
+                if (tokenParts.size >= 2) {
+                    val host = tokenParts[0].trim()
+                    val port = tokenParts[1].trim().toIntOrNull() ?: continue
+                    
+                    // If we didn't find credentials via @ but we have 4 tokens (host:port:user:pass)
+                    if (tokenParts.size >= 4 && user.isEmpty()) {
+                        user = tokenParts[2].trim()
+                        pass = tokenParts[3].trim()
+                    }
+                    
+                    parsedList.add(
+                        ProxyBankItem(
+                            type = protocol,
+                            host = host,
+                            port = port,
+                            user = user,
+                            pass = pass,
+                            label = "$protocol://$host:$port"
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                // Ignore individual malformed line
+            }
+        }
+        return parsedList
+    }
+
     // State flow containing the target URL path to signal WebView to navigate
     private val _navigationTrigger = MutableSharedFlow<String>()
     val navigationTrigger: SharedFlow<String> = _navigationTrigger.asSharedFlow()

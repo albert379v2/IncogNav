@@ -134,6 +134,8 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
     var showHistoryDialog by remember { mutableStateOf(false) }
     var showBookmarksDialog by remember { mutableStateOf(false) }
     var showIdentityGenerator by remember { mutableStateOf(false) }
+    var showProxyBankDialog by remember { mutableStateOf(false) }
+    val proxiesList by viewModel.allProxies.collectAsStateWithLifecycle()
     var generatorSelectedState by remember { mutableStateOf<String?>("Jalisco") }
     var currentGeneratedIdentity by remember {
         mutableStateOf(com.example.util.MexicanIdentityGenerator.generate("Jalisco"))
@@ -238,6 +240,10 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                     },
                     onIdentityGeneratorClick = {
                         showIdentityGenerator = true
+                        scope.launch { drawerState.close() }
+                    },
+                    onProxyBankClick = {
+                        showProxyBankDialog = true
                         scope.launch { drawerState.close() }
                     }
                 )
@@ -618,7 +624,11 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
     // Dialog components
     if (showCreateProfileDialog) {
         CreateProfileDialog(
+            proxies = proxiesList,
             onDismiss = { showCreateProfileDialog = false },
+            onImportProxies = { bulkText ->
+                viewModel.addProxiesBulk(bulkText, "HTTP")
+            },
             onCreate = { name, initialUrl, userAgentType, customUa, proxyType, proxyHost, proxyPort, proxyUser, proxyPass, isIncognito, canvasNoise, webglSpoof, platform, languages ->
                 viewModel.createProfile(
                     name, initialUrl, userAgentType, customUa, proxyType, proxyHost, proxyPort, proxyUser, proxyPass, isIncognito, canvasNoise, webglSpoof, platform, languages
@@ -631,7 +641,11 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
     profileToEdit?.let { target ->
         EditProfileDialog(
             profile = target,
+            proxies = proxiesList,
             onDismiss = { profileToEdit = null },
+            onImportProxies = { bulkText ->
+                viewModel.addProxiesBulk(bulkText, "HTTP")
+            },
             onConfirm = { updated ->
                 viewModel.updateProfile(updated)
                 profileToEdit = null
@@ -692,6 +706,13 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
             identity = currentGeneratedIdentity,
             onIdentityChange = { currentGeneratedIdentity = it },
             onDismiss = { showIdentityGenerator = false }
+        )
+    }
+
+    if (showProxyBankDialog) {
+        ProxyBankDialog(
+            viewModel = viewModel,
+            onDismiss = { showProxyBankDialog = false }
         )
     }
 }
@@ -839,7 +860,8 @@ fun DrawerProfilePanel(
     onEditProfileClick: (BrowserProfile) -> Unit,
     onCloseClick: () -> Unit,
     onClearCacheClick: () -> Unit,
-    onIdentityGeneratorClick: () -> Unit
+    onIdentityGeneratorClick: () -> Unit,
+    onProxyBankClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -944,26 +966,55 @@ fun DrawerProfilePanel(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Mexican Fake Identity Generator button
-        Button(
-            onClick = onIdentityGeneratorClick,
-            colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, AccentTeal.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
-            shape = RoundedCornerShape(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "🇲🇽",
-                fontSize = 16.sp
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Generador Identidades MX",
-                color = AccentTeal,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
+            // Mexican Fake Identity Generator button
+            Button(
+                onClick = onIdentityGeneratorClick,
+                colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
+                modifier = Modifier
+                    .weight(1f)
+                    .border(1.dp, AccentTeal.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = "🇲🇽",
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Identidades",
+                    color = AccentTeal,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Proxy Bank button
+            Button(
+                onClick = onProxyBankClick,
+                colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
+                modifier = Modifier
+                    .weight(1f)
+                    .border(1.dp, BrightCyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = "🌐",
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Banco Proxy",
+                    color = BrightCyan,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -1265,7 +1316,9 @@ fun DrawerProfilePanel(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateProfileDialog(
+    proxies: List<com.example.data.ProxyBankItem> = emptyList(),
     onDismiss: () -> Unit,
+    onImportProxies: ((String) -> Unit)? = null,
     onCreate: (
         name: String,
         initialUrl: String,
@@ -1375,7 +1428,7 @@ fun CreateProfileDialog(
                             Text("User Agent String Personalizado", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                             OutlinedTextField(
                                 value = customUa,
-                                onValueChange = { customUa = it },
+                                	onValueChange = { customUa = it },
                                 placeholder = { Text("Mozilla/5.0 ...") },
                                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
                                 modifier = Modifier.fillMaxWidth()
@@ -1404,6 +1457,198 @@ fun CreateProfileDialog(
 
                 item {
                     Text("Configuraciones de Proxy", color = BrightCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                if (proxies.isEmpty()) {
+                    item {
+                        var showQuickImport by remember { mutableStateOf(false) }
+                        var quickImportText by remember { mutableStateOf("") }
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CardBackground)
+                                .border(1.dp, BrightCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("🌐", fontSize = 16.sp)
+                                    Text("Pool de Proxies (Vacío)", color = TextOffWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                TextButton(
+                                    onClick = { showQuickImport = !showQuickImport },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(if (showQuickImport) "Cancelar" else "+ Importar", color = AccentTeal, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            
+                            if (showQuickImport) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = quickImportText,
+                                    onValueChange = { quickImportText = it },
+                                    placeholder = { 
+                                        Text(
+                                            "Pega proxies en formato:\nIP:Puerto o IP:Puerto:User:Pass",
+                                            color = TextMuted,
+                                            fontSize = 10.sp
+                                        ) 
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(80.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = BrightCyan, 
+                                        unfocusedBorderColor = Color(0xFF49454F)
+                                    ),
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (quickImportText.trim().isNotEmpty()) {
+                                            onImportProxies?.invoke(quickImportText)
+                                            quickImportText = ""
+                                            showQuickImport = false
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Guardar en el Banco", color = PremiumVoid, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text(
+                                    "No tienes proxies guardados en tu pool local. Puedes importarlos rápidamente aquí para autocompletar este perfil.",
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    item {
+                        var bankExpanded by remember { mutableStateOf(false) }
+                        var showQuickImport by remember { mutableStateOf(false) }
+                        var quickImportText by remember { mutableStateOf("") }
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CardBackground)
+                                .border(1.dp, AccentTeal.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("🌐", fontSize = 16.sp)
+                                    Text("Cargar desde Pool de Proxies", color = TextOffWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                TextButton(
+                                    onClick = { showQuickImport = !showQuickImport },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(if (showQuickImport) "Cancelar" else "+ Importar", color = AccentTeal, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            
+                            if (showQuickImport) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = quickImportText,
+                                    onValueChange = { quickImportText = it },
+                                    placeholder = { 
+                                        Text(
+                                            "Pega proxies en formato:\nIP:Puerto o IP:Puerto:User:Pass",
+                                            color = TextMuted,
+                                            fontSize = 10.sp
+                                        ) 
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(80.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = BrightCyan, 
+                                        unfocusedBorderColor = Color(0xFF49454F)
+                                    ),
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (quickImportText.trim().isNotEmpty()) {
+                                            onImportProxies?.invoke(quickImportText)
+                                            quickImportText = ""
+                                            showQuickImport = false
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Guardar en el Banco", color = PremiumVoid, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    Button(
+                                        onClick = { bankExpanded = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(1.dp, AccentTeal.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Default.Language, contentDescription = "Cargar", tint = AccentTeal, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Seleccionar Proxy (${proxies.size} disp.) ▾", color = AccentTeal, fontSize = 12.sp)
+                                    }
+                                    DropdownMenu(
+                                        expanded = bankExpanded,
+                                        onDismissRequest = { bankExpanded = false },
+                                        modifier = Modifier.background(PremiumVoid).width(280.dp)
+                                    ) {
+                                        proxies.forEach { proxy ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Column {
+                                                        Text("${proxy.type}://${proxy.host}:${proxy.port}", color = TextOffWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                        if (proxy.user.isNotEmpty()) {
+                                                            Text("User: ${proxy.user}", color = TextMuted, fontSize = 10.sp)
+                                                        }
+                                                    }
+                                                },
+                                                onClick = {
+                                                    proxyType = proxy.type
+                                                    proxyHost = proxy.host
+                                                    proxyPort = proxy.port.toString()
+                                                    proxyUser = proxy.user
+                                                    proxyPass = proxy.pass
+                                                    bankExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 item {
@@ -1599,7 +1844,9 @@ fun CreateProfileDialog(
 @Composable
 fun EditProfileDialog(
     profile: com.example.data.BrowserProfile,
+    proxies: List<com.example.data.ProxyBankItem> = emptyList(),
     onDismiss: () -> Unit,
+    onImportProxies: ((String) -> Unit)? = null,
     onConfirm: (com.example.data.BrowserProfile) -> Unit
 ) {
     var name by remember { mutableStateOf(profile.name) }
@@ -1723,6 +1970,198 @@ fun EditProfileDialog(
 
                 item {
                     Text("Configuraciones de Proxy", color = BrightCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                if (proxies.isEmpty()) {
+                    item {
+                        var showQuickImport by remember { mutableStateOf(false) }
+                        var quickImportText by remember { mutableStateOf("") }
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CardBackground)
+                                .border(1.dp, BrightCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("🌐", fontSize = 16.sp)
+                                    Text("Pool de Proxies (Vacío)", color = TextOffWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                TextButton(
+                                    onClick = { showQuickImport = !showQuickImport },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(if (showQuickImport) "Cancelar" else "+ Importar", color = AccentTeal, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            
+                            if (showQuickImport) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = quickImportText,
+                                    onValueChange = { quickImportText = it },
+                                    placeholder = { 
+                                        Text(
+                                            "Pega proxies en formato:\nIP:Puerto o IP:Puerto:User:Pass",
+                                            color = TextMuted,
+                                            fontSize = 10.sp
+                                        ) 
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(80.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = BrightCyan, 
+                                        unfocusedBorderColor = Color(0xFF49454F)
+                                    ),
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (quickImportText.trim().isNotEmpty()) {
+                                            onImportProxies?.invoke(quickImportText)
+                                            quickImportText = ""
+                                            showQuickImport = false
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Guardar en el Banco", color = PremiumVoid, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text(
+                                    "No tienes proxies guardados en tu pool local. Puedes importarlos rápidamente aquí para autocompletar este perfil.",
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    item {
+                        var bankExpanded by remember { mutableStateOf(false) }
+                        var showQuickImport by remember { mutableStateOf(false) }
+                        var quickImportText by remember { mutableStateOf("") }
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CardBackground)
+                                .border(1.dp, AccentTeal.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("🌐", fontSize = 16.sp)
+                                    Text("Cargar desde Pool de Proxies", color = TextOffWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                TextButton(
+                                    onClick = { showQuickImport = !showQuickImport },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(if (showQuickImport) "Cancelar" else "+ Importar", color = AccentTeal, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            
+                            if (showQuickImport) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = quickImportText,
+                                    onValueChange = { quickImportText = it },
+                                    placeholder = { 
+                                        Text(
+                                            "Pega proxies en formato:\nIP:Puerto o IP:Puerto:User:Pass",
+                                            color = TextMuted,
+                                            fontSize = 10.sp
+                                        ) 
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(80.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = BrightCyan, 
+                                        unfocusedBorderColor = Color(0xFF49454F)
+                                    ),
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (quickImportText.trim().isNotEmpty()) {
+                                            onImportProxies?.invoke(quickImportText)
+                                            quickImportText = ""
+                                            showQuickImport = false
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Guardar en el Banco", color = PremiumVoid, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    Button(
+                                        onClick = { bankExpanded = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(1.dp, AccentTeal.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Default.Language, contentDescription = "Cargar", tint = AccentTeal, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Seleccionar Proxy (${proxies.size} disp.) ▾", color = AccentTeal, fontSize = 12.sp)
+                                    }
+                                    DropdownMenu(
+                                        expanded = bankExpanded,
+                                        onDismissRequest = { bankExpanded = false },
+                                        modifier = Modifier.background(PremiumVoid).width(280.dp)
+                                    ) {
+                                        proxies.forEach { proxy ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Column {
+                                                        Text("${proxy.type}://${proxy.host}:${proxy.port}", color = TextOffWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                        if (proxy.user.isNotEmpty()) {
+                                                            Text("User: ${proxy.user}", color = TextMuted, fontSize = 10.sp)
+                                                        }
+                                                    }
+                                                },
+                                                onClick = {
+                                                    proxyType = proxy.type
+                                                    proxyHost = proxy.host
+                                                    proxyPort = proxy.port.toString()
+                                                    proxyUser = proxy.user
+                                                    proxyPass = proxy.pass
+                                                    bankExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 item {
@@ -2873,6 +3312,371 @@ fun IdentityFieldRow(
                     tint = BrightCyan,
                     modifier = Modifier.size(16.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun ProxyBankDialog(
+    viewModel: com.example.ui.BrowserViewModel,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val proxies by viewModel.allProxies.collectAsStateWithLifecycle(initialValue = emptyList())
+    
+    var activeTab by remember { mutableStateOf(0) } // 0: List, 1: Bulk Paste
+    var bulkText by remember { mutableStateOf("") }
+    var defaultProtocol by remember { mutableStateOf("HTTP") }
+    var protocolDropdownExpanded by remember { mutableStateOf(false) }
+    
+    val protocolOptions = listOf("HTTP", "HTTPS", "SOCKS4", "SOCKS5")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("🌐", fontSize = 24.sp)
+                Column {
+                    Text(
+                        "Banco de Proxies", 
+                        color = BrightCyan, 
+                        fontSize = 18.sp, 
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "ALMACENAMIENTO LOCAL DE PROXIES", 
+                        color = TextMuted, 
+                        fontSize = 9.sp, 
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Tab layout
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(LightAccents),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    val tabModifier0 = Modifier
+                        .weight(1f)
+                        .clickable { activeTab = 0 }
+                        .background(if (activeTab == 0) AccentTeal else Color.Transparent)
+                        .padding(vertical = 10.dp)
+                    val tabModifier1 = Modifier
+                        .weight(1f)
+                        .clickable { activeTab = 1 }
+                        .background(if (activeTab == 1) AccentTeal else Color.Transparent)
+                        .padding(vertical = 10.dp)
+                        
+                    Box(modifier = tabModifier0, contentAlignment = Alignment.Center) {
+                        Text(
+                            "Lista (${proxies.size})", 
+                            color = if (activeTab == 0) PremiumVoid else TextOffWhite, 
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Box(modifier = tabModifier1, contentAlignment = Alignment.Center) {
+                        Text(
+                            "Importar en Masa", 
+                            color = if (activeTab == 1) PremiumVoid else TextOffWhite, 
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+
+                if (activeTab == 0) {
+                    // Proxies List View
+                    if (proxies.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("📭", fontSize = 36.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "No hay proxies guardados.", 
+                                    color = TextMuted, 
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    "Importa o agrega proxies en la pestaña superior.", 
+                                    color = TextMuted, 
+                                    fontSize = 11.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        Column(modifier = Modifier.weight(1f)) {
+                            // Row with test all button
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Proxies registrados", color = TextOffWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(
+                                        onClick = {
+                                            proxies.forEach { viewModel.testProxy(it) }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("Probar Todos", color = AccentTeal, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            viewModel.clearProxyBank()
+                                            Toast.makeText(context, "Banco de proxies vaciado", Toast.LENGTH_SHORT).show()
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("Vaciar", color = Color.Red.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(proxies) { proxy ->
+                                    ProxyBankRowItem(
+                                        proxy = proxy,
+                                        onTest = { viewModel.testProxy(proxy) },
+                                        onDelete = { viewModel.deleteProxy(proxy) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Bulk Paste tab
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            "Pega tu lista de proxies (uno por línea):", 
+                            color = TextOffWhite, 
+                            fontSize = 11.sp
+                        )
+                        
+                        OutlinedTextField(
+                            value = bulkText,
+                            onValueChange = { bulkText = it },
+                            placeholder = { 
+                                Text(
+                                    "Formatos soportados:\n" +
+                                    "• IP:Puerto\n" +
+                                    "• IP:Puerto:Usuario:Contraseña\n" +
+                                    "• protocol://IP:Puerto\n" +
+                                    "• protocol://Usuario:Contraseña@IP:Puerto",
+                                    color = TextMuted,
+                                    fontSize = 11.sp
+                                ) 
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            minLines = 5,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = BrightCyan, 
+                                unfocusedBorderColor = Color(0xFF49454F)
+                            ),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("Protocolo por Defecto", color = TextMuted, fontSize = 10.sp)
+                                Box {
+                                    Button(
+                                        onClick = { protocolDropdownExpanded = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("$defaultProtocol ▾", color = BrightCyan, fontSize = 11.sp)
+                                    }
+                                    DropdownMenu(
+                                        expanded = protocolDropdownExpanded,
+                                        onDismissRequest = { protocolDropdownExpanded = false },
+                                        modifier = Modifier.background(PremiumVoid)
+                                    ) {
+                                        protocolOptions.forEach { proto ->
+                                            DropdownMenuItem(
+                                                text = { Text(proto, color = TextOffWhite, fontSize = 12.sp) },
+                                                onClick = {
+                                                    defaultProtocol = proto
+                                                    protocolDropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    if (bulkText.trim().isEmpty()) {
+                                        Toast.makeText(context, "Por favor pega texto con proxies", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        viewModel.addProxiesBulk(bulkText, defaultProtocol)
+                                        Toast.makeText(context, "Procesando e importando proxies...", Toast.LENGTH_SHORT).show()
+                                        bulkText = ""
+                                        activeTab = 0 // Switch back to list tab
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Importar", tint = PremiumVoid, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Importar Lista", color = PremiumVoid, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = LightAccents)
+            ) {
+                Text("Cerrar", color = TextOffWhite)
+            }
+        },
+        containerColor = PremiumVoid
+    )
+}
+
+@Composable
+fun ProxyBankRowItem(
+    proxy: com.example.data.ProxyBankItem,
+    onTest: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(CardBackground)
+            .border(1.dp, Color(0xFF49454F), RoundedCornerShape(12.dp))
+            .padding(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = proxy.type,
+                        color = BrightCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(BrightCyan.copy(alpha = 0.15f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                    
+                    if (proxy.isWorking != null) {
+                        val badgeColor = if (proxy.isWorking == true) Color(0xFF2E7D32) else Color(0xFFC62828)
+                        val badgeText = if (proxy.isWorking == true) "Activo (${proxy.latencyMs}ms)" else "Error"
+                        Text(
+                            text = badgeText,
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(badgeColor)
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${proxy.host}:${proxy.port}",
+                    color = TextOffWhite,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+                if (proxy.user.isNotEmpty()) {
+                    Text(
+                        text = "User: ${proxy.user}",
+                        color = TextMuted,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                IconButton(
+                    onClick = onTest,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(LightAccents)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Probar",
+                        tint = AccentTeal,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(LightAccents)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Borrar",
+                        tint = Color.Red.copy(alpha = 0.7f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
     }

@@ -12,9 +12,10 @@ import androidx.room.RoomDatabase
         ProfileHistory::class,
         ProfileBookmark::class,
         ProfileVisitedDomain::class,
-        ProfileLocalStorage::class
+        ProfileLocalStorage::class,
+        ProxyBankItem::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

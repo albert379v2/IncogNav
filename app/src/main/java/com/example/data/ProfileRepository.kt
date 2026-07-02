@@ -88,4 +88,26 @@ class ProfileRepository(private val profileDao: ProfileDao) {
     suspend fun deleteLocalStorageForProfile(profileId: Long) {
         profileDao.deleteLocalStorageForProfile(profileId)
     }
+
+    val allProxies: Flow<List<ProxyBankItem>> = profileDao.getAllProxies()
+
+    suspend fun insertProxy(proxy: ProxyBankItem): Long {
+        return profileDao.insertProxy(proxy)
+    }
+
+    suspend fun insertProxies(proxies: List<ProxyBankItem>) {
+        profileDao.insertProxies(proxies)
+    }
+
+    suspend fun updateProxy(proxy: ProxyBankItem) {
+        profileDao.updateProxy(proxy)
+    }
+
+    suspend fun deleteProxy(proxy: ProxyBankItem) {
+        profileDao.deleteProxy(proxy)
+    }
+
+    suspend fun clearProxyBank() {
+        profileDao.clearProxyBank()
+    }
 }
