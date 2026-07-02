@@ -133,6 +133,11 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
     var showProtectionShieldDialog by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
     var showBookmarksDialog by remember { mutableStateOf(false) }
+    var showIdentityGenerator by remember { mutableStateOf(false) }
+    var generatorSelectedState by remember { mutableStateOf<String?>("Jalisco") }
+    var currentGeneratedIdentity by remember {
+        mutableStateOf(com.example.util.MexicanIdentityGenerator.generate("Jalisco"))
+    }
     var profileToEdit by remember { mutableStateOf<com.example.data.BrowserProfile?>(null) }
 
     // Navigation trigger observer
@@ -230,6 +235,10 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                     },
                     onClearCacheClick = {
                         viewModel.clearGlobalCache(context)
+                    },
+                    onIdentityGeneratorClick = {
+                        showIdentityGenerator = true
+                        scope.launch { drawerState.close() }
                     }
                 )
             }
@@ -253,6 +262,9 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                 },
                 onEditProfile = { profile ->
                     profileToEdit = profile
+                },
+                onIdentityGeneratorClick = {
+                    showIdentityGenerator = true
                 }
             )
         } else {
@@ -672,6 +684,16 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
             }
         )
     }
+
+    if (showIdentityGenerator) {
+        MexicanIdentityGeneratorDialog(
+            selectedState = generatorSelectedState,
+            onSelectedStateChange = { generatorSelectedState = it },
+            identity = currentGeneratedIdentity,
+            onIdentityChange = { currentGeneratedIdentity = it },
+            onDismiss = { showIdentityGenerator = false }
+        )
+    }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -816,7 +838,8 @@ fun DrawerProfilePanel(
     onDeleteProfileClick: (BrowserProfile) -> Unit,
     onEditProfileClick: (BrowserProfile) -> Unit,
     onCloseClick: () -> Unit,
-    onClearCacheClick: () -> Unit
+    onClearCacheClick: () -> Unit,
+    onIdentityGeneratorClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -916,6 +939,30 @@ fun DrawerProfilePanel(
                 text = "Limpiar Caché Global",
                 color = BrightCyan,
                 fontSize = 14.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Mexican Fake Identity Generator button
+        Button(
+            onClick = onIdentityGeneratorClick,
+            colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, AccentTeal.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(
+                text = "🇲🇽",
+                fontSize = 16.sp
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Generador Identidades MX",
+                color = AccentTeal,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
             )
         }
 
@@ -2220,7 +2267,8 @@ fun DashboardScreen(
     onCreateProfileClick: () -> Unit,
     onOpenDrawerClick: () -> Unit,
     onDeleteProfile: (com.example.data.BrowserProfile) -> Unit,
-    onEditProfile: (com.example.data.BrowserProfile) -> Unit
+    onEditProfile: (com.example.data.BrowserProfile) -> Unit,
+    onIdentityGeneratorClick: () -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -2591,6 +2639,240 @@ fun DashboardScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun MexicanIdentityGeneratorDialog(
+    selectedState: String?,
+    onSelectedStateChange: (String?) -> Unit,
+    identity: com.example.util.MexicanIdentityGenerator.GeneratedIdentity,
+    onIdentityChange: (com.example.util.MexicanIdentityGenerator.GeneratedIdentity) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    
+    var stateDropdownExpanded by remember { mutableStateOf(false) }
+    val statesList = listOf("Cualquiera") + com.example.util.MexicanIdentityGenerator.states.map { it.name }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("🇲🇽", fontSize = 24.sp)
+                Column {
+                    Text(
+                        "Generador de Identidades MX", 
+                        color = BrightCyan, 
+                        fontSize = 18.sp, 
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "DATOS SINTÉTICOS DE MÉXICO", 
+                        color = TextMuted, 
+                        fontSize = 9.sp, 
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // State selector
+                item {
+                    Column {
+                        Text(
+                            "Estado de procedencia", 
+                            color = TextOffWhite, 
+                            fontSize = 11.sp, 
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { stateDropdownExpanded = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("${selectedState ?: "Cualquiera"} ▾", color = BrightCyan, fontWeight = FontWeight.SemiBold)
+                            }
+                            DropdownMenu(
+                                expanded = stateDropdownExpanded,
+                                onDismissRequest = { stateDropdownExpanded = false },
+                                modifier = Modifier.background(PremiumVoid)
+                            ) {
+                                statesList.forEach { stateName ->
+                                    DropdownMenuItem(
+                                        text = { Text(stateName, color = TextOffWhite) },
+                                        onClick = {
+                                            val newState = if (stateName == "Cualquiera") null else stateName
+                                            onSelectedStateChange(newState)
+                                            stateDropdownExpanded = false
+                                            // Persist the current identity - do not auto-regenerate on dropdown change!
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Generar Button
+                item {
+                    Button(
+                        onClick = {
+                            onIdentityChange(com.example.util.MexicanIdentityGenerator.generate(selectedState))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh, 
+                            contentDescription = "Regenerar",
+                            tint = PremiumVoid,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Generar Nueva Identidad", color = PremiumVoid, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Divider
+                item {
+                    HorizontalDivider(color = Color(0xFF49454F), thickness = 1.dp, modifier = Modifier.padding(vertical = 4.dp))
+                }
+
+                // Fields mapping with Copy action
+                val fields = listOf(
+                    Triple("Nombre Completo", identity.name, "Nombre copiado 👤"),
+                    Triple("CURP", identity.curp, "CURP copiado 📄"),
+                    Triple("RFC", identity.rfc, "RFC copiado 📄"),
+                    Triple("Teléfono (Lada MX)", identity.phone, "Teléfono copiado 📞"),
+                    Triple("Dirección Completa", identity.address, "Dirección copiada 🏠"),
+                    Triple("Código Postal (CP)", identity.postalCode, "Código postal copiado 📮")
+                )
+
+                items(fields) { (label, value, toastMessage) ->
+                    IdentityFieldRow(
+                        label = label,
+                        value = value,
+                        onCopy = {
+                            clipboardManager.setText(AnnotatedString(value))
+                            Toast.makeText(context, toastMessage, Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+                
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val fullText = """
+                                Nombre: ${identity.name}
+                                CURP: ${identity.curp}
+                                RFC: ${identity.rfc}
+                                Teléfono: ${identity.phone}
+                                Dirección: ${identity.address}
+                                CP: ${identity.postalCode}
+                                Estado: ${identity.stateName}
+                                Género: ${identity.gender}
+                                Fecha de Nacimiento: ${identity.birthDateStr}
+                            """.trimIndent()
+                            clipboardManager.setText(AnnotatedString(fullText))
+                            Toast.makeText(context, "Toda la identidad copiada 🇲🇽", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, BrightCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy, 
+                            contentDescription = "Copiar Todo", 
+                            tint = BrightCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Copiar Identidad Completa", color = BrightCyan, fontSize = 13.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = LightAccents)
+            ) {
+                Text("Cerrar", color = TextOffWhite)
+            }
+        },
+        containerColor = PremiumVoid
+    )
+}
+
+@Composable
+fun IdentityFieldRow(
+    label: String,
+    value: String,
+    onCopy: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(CardBackground)
+            .border(1.dp, Color(0xFF49454F), RoundedCornerShape(14.dp))
+            .clickable { onCopy() }
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(
+                    text = label.uppercase(), 
+                    color = TextMuted, 
+                    fontSize = 8.sp, 
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = value, 
+                    color = TextOffWhite, 
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            IconButton(
+                onClick = onCopy,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(LightAccents)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copiar $label",
+                    tint = BrightCyan,
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }
