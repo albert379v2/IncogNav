@@ -133,6 +133,7 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
     var showProtectionShieldDialog by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
     var showBookmarksDialog by remember { mutableStateOf(false) }
+    var profileToEdit by remember { mutableStateOf<com.example.data.BrowserProfile?>(null) }
 
     // Navigation trigger observer
     LaunchedEffect(key1 = true) {
@@ -221,6 +222,9 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                     onDeleteProfileClick = { profile ->
                         viewModel.deleteProfile(profile)
                     },
+                    onEditProfileClick = { profile ->
+                        profileToEdit = profile
+                    },
                     onCloseClick = {
                         scope.launch { drawerState.close() }
                     },
@@ -246,6 +250,9 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
                 },
                 onDeleteProfile = { profile ->
                     viewModel.deleteProfile(profile)
+                },
+                onEditProfile = { profile ->
+                    profileToEdit = profile
                 }
             )
         } else {
@@ -609,6 +616,17 @@ fun MainBrowserScreen(viewModel: BrowserViewModel) {
         )
     }
 
+    profileToEdit?.let { target ->
+        EditProfileDialog(
+            profile = target,
+            onDismiss = { profileToEdit = null },
+            onConfirm = { updated ->
+                viewModel.updateProfile(updated)
+                profileToEdit = null
+            }
+        )
+    }
+
     if (showProtectionShieldDialog) {
         ProtectionShieldDialog(
             profile = activeProfile,
@@ -796,6 +814,7 @@ fun DrawerProfilePanel(
     onSelectProfile: (Long) -> Unit,
     onCreateProfileClick: () -> Unit,
     onDeleteProfileClick: (BrowserProfile) -> Unit,
+    onEditProfileClick: (BrowserProfile) -> Unit,
     onCloseClick: () -> Unit,
     onClearCacheClick: () -> Unit
 ) {
@@ -1000,16 +1019,32 @@ fun DrawerProfilePanel(
                                 )
                             }
                             
-                            IconButton(
-                                onClick = { onDeleteProfileClick(profile) },
-                                modifier = Modifier.size(24.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Borrar perfil",
-                                    tint = Color(0xFFCAC4D0),
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                IconButton(
+                                    onClick = { onEditProfileClick(profile) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Editar perfil",
+                                        tint = BrightCyan,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onDeleteProfileClick(profile) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Borrar perfil",
+                                        tint = Color(0xFFCAC4D0),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1514,6 +1549,341 @@ fun CreateProfileDialog(
     )
 }
 
+@Composable
+fun EditProfileDialog(
+    profile: com.example.data.BrowserProfile,
+    onDismiss: () -> Unit,
+    onConfirm: (com.example.data.BrowserProfile) -> Unit
+) {
+    var name by remember { mutableStateOf(profile.name) }
+    var initialUrl by remember { mutableStateOf(profile.initialUrl) }
+    var userAgentType by remember { mutableStateOf(profile.userAgentType) }
+    var customUa by remember { mutableStateOf(profile.customUserAgent) }
+    var proxyType by remember { mutableStateOf(profile.proxyType) }
+    var proxyHost by remember { mutableStateOf(profile.proxyHost) }
+    var proxyPort by remember { mutableStateOf(profile.proxyPort.toString()) }
+    var proxyUser by remember { mutableStateOf(profile.proxyUser) }
+    var proxyPass by remember { mutableStateOf(profile.proxyPass) }
+    var isIncognito by remember { mutableStateOf(profile.isIncognito) }
+    var canvasNoise by remember { mutableStateOf(profile.canvasNoiseEnabled) }
+    var webglSpoof by remember { mutableStateOf(profile.webGlSpoofEnabled) }
+    var platform by remember { mutableStateOf(profile.spoofedPlatform) }
+    var languages by remember { mutableStateOf(profile.spoofedLanguages) }
+
+    val userAgentOptions = listOf("Default", "Chrome Mobile", "Safari iPhone", "Firefox Mobile", "Edge Mobile", "Chrome Desktop", "Safari Mac", "Custom")
+    val proxyOptions = listOf("DIRECT", "HTTP", "HTTPS", "SOCKS4", "SOCKS5")
+    val platformOptions = listOf("Default", "Win32", "MacIntel", "iPhone", "Linux armv8l")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Editar Perfil de Navegación", color = BrightCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    Column {
+                        Text("Nombre del perfil *", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            placeholder = { Text("Ej. Juan Spotify") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                item {
+                    Column {
+                        Text("URL Inicial", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        OutlinedTextField(
+                            value = initialUrl,
+                            onValueChange = { initialUrl = it },
+                            placeholder = { Text("https://www.google.com") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                item {
+                    Column {
+                        Text("User Agent Presets", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { expanded = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("$userAgentType ▾", color = BrightCyan)
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                                modifier = Modifier.background(PremiumVoid)
+                            ) {
+                                userAgentOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option, color = TextOffWhite) },
+                                        onClick = {
+                                            userAgentType = option
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (userAgentType == "Custom") {
+                    item {
+                        Column {
+                            Text("User Agent String Personalizado", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                            OutlinedTextField(
+                                value = customUa,
+                                onValueChange = { customUa = it },
+                                placeholder = { Text("Mozilla/5.0 ...") },
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Modo Incógnito Integrado", color = TextOffWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("No graba historial y limpia al salir", color = TextMuted, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = isIncognito,
+                            onCheckedChange = { isIncognito = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = GlowGreen)
+                        )
+                    }
+                }
+
+                item {
+                    Text("Configuraciones de Proxy", color = BrightCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                item {
+                    Column {
+                        Text("Tipo de Proxy", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { expanded = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("$proxyType ▾", color = BrightCyan)
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                                modifier = Modifier.background(PremiumVoid)
+                            ) {
+                                proxyOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option, color = TextOffWhite) },
+                                        onClick = {
+                                            proxyType = option
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (proxyType != "DIRECT") {
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(modifier = Modifier.weight(2f)) {
+                                Text("Host / IP", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                OutlinedTextField(
+                                    value = proxyHost,
+                                    onValueChange = { proxyHost = it },
+                                    placeholder = { Text("12.34.56.78") },
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Puerto", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                OutlinedTextField(
+                                    value = proxyPort,
+                                    onValueChange = { proxyPort = it },
+                                    placeholder = { Text("8080") },
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Usuario Proxy (Opcional)", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                OutlinedTextField(
+                                    value = proxyUser,
+                                    onValueChange = { proxyUser = it },
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Clave Proxy (Opcional)", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                OutlinedTextField(
+                                    value = proxyPass,
+                                    onValueChange = { proxyPass = it },
+                                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Text("Protecciones Avanzadas (Antidetect)", color = BrightCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Canvas Ruido Invisible", color = TextOffWhite, fontSize = 12.sp)
+                            Text("Evita rastreos por huella WebGL/Canvas", color = TextMuted, fontSize = 9.sp)
+                        }
+                        Switch(
+                            checked = canvasNoise,
+                            onCheckedChange = { canvasNoise = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = GlowGreen)
+                        )
+                    }
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("WebGL Spoofing Inteligente", color = TextOffWhite, fontSize = 12.sp)
+                            Text("Disfraza la tarjeta gráfica real", color = TextMuted, fontSize = 9.sp)
+                        }
+                        Switch(
+                            checked = webglSpoof,
+                            onCheckedChange = { webglSpoof = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = GlowGreen)
+                        )
+                    }
+                }
+
+                item {
+                    Column {
+                        Text("Spoofing de Plataforma", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { expanded = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = LightAccents),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("$platform ▾", color = BrightCyan)
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                                modifier = Modifier.background(PremiumVoid)
+                            ) {
+                                platformOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option, color = TextOffWhite) },
+                                        onClick = {
+                                            platform = option
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Column {
+                        Text("Idiomas del Navegador (Spoof)", color = TextOffWhite, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        OutlinedTextField(
+                            value = languages,
+                            onValueChange = { languages = it },
+                            placeholder = { Text("Default o ej: es-MX,es;q=0.9") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BrightCyan, unfocusedBorderColor = TextMuted),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.trim().isNotEmpty()) {
+                        val parsedPort = proxyPort.trim().toIntOrNull() ?: 0
+                        onConfirm(
+                            profile.copy(
+                                name = name.trim(),
+                                initialUrl = if (initialUrl.trim().isNotEmpty()) initialUrl.trim() else "https://www.google.com",
+                                userAgentType = userAgentType,
+                                customUserAgent = customUa.trim(),
+                                proxyType = proxyType,
+                                proxyHost = proxyHost.trim(),
+                                proxyPort = parsedPort,
+                                proxyUser = proxyUser.trim(),
+                                proxyPass = proxyPass,
+                                isIncognito = isIncognito,
+                                canvasNoiseEnabled = canvasNoise,
+                                webGlSpoofEnabled = webglSpoof,
+                                spoofedPlatform = platform,
+                                spoofedLanguages = languages.trim()
+                            )
+                        )
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentTeal),
+                enabled = name.trim().isNotEmpty()
+            ) {
+                Text("Guardar", color = PremiumVoid, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = TextMuted)
+            }
+        },
+        containerColor = PremiumVoid
+    )
+}
+
 // Metricas de proteccion y configuracion dialog
 @Composable
 fun ProtectionShieldDialog(
@@ -1849,7 +2219,8 @@ fun DashboardScreen(
     onSelectProfile: (Long) -> Unit,
     onCreateProfileClick: () -> Unit,
     onOpenDrawerClick: () -> Unit,
-    onDeleteProfile: (com.example.data.BrowserProfile) -> Unit
+    onDeleteProfile: (com.example.data.BrowserProfile) -> Unit,
+    onEditProfile: (com.example.data.BrowserProfile) -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -2190,16 +2561,32 @@ fun DashboardScreen(
                                 }
                             }
                             
-                            IconButton(
-                                onClick = { onDeleteProfile(profile) },
-                                modifier = Modifier.size(36.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Borrar perfil",
-                                    tint = DangerRed.copy(alpha = 0.8f),
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                IconButton(
+                                    onClick = { onEditProfile(profile) },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Editar perfil",
+                                        tint = BrightCyan.copy(alpha = 0.8f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onDeleteProfile(profile) },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Borrar perfil",
+                                        tint = DangerRed.copy(alpha = 0.8f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }

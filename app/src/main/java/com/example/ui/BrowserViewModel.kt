@@ -17,8 +17,13 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
@@ -30,11 +35,35 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _activeProfile = MutableStateFlow<BrowserProfile?>(null)
     val activeProfile: StateFlow<BrowserProfile?> = _activeProfile
 
-    private val _activeHistoryList = MutableStateFlow<List<ProfileHistory>>(emptyList())
-    val activeHistoryList: StateFlow<List<ProfileHistory>> = _activeHistoryList
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val activeHistoryList: StateFlow<List<ProfileHistory>> = _activeProfile
+        .flatMapLatest { profile ->
+            if (profile != null) {
+                repository.getHistoryForProfile(profile.id)
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
-    private val _activeBookmarksList = MutableStateFlow<List<ProfileBookmark>>(emptyList())
-    val activeBookmarksList: StateFlow<List<ProfileBookmark>> = _activeBookmarksList
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val activeBookmarksList: StateFlow<List<ProfileBookmark>> = _activeProfile
+        .flatMapLatest { profile ->
+            if (profile != null) {
+                repository.getBookmarksForProfile(profile.id)
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     // State flow containing the target URL path to signal WebView to navigate
     private val _navigationTrigger = MutableSharedFlow<String>()
@@ -85,18 +114,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             visitedDomainsCache.clear()
             val domains = repository.getVisitedDomainsForProfile(target.id)
             visitedDomainsCache.addAll(domains.map { it.domainUrl.lowercase() })
-
-            // Synchronize room items flow
-            viewModelScope.launch {
-                repository.getHistoryForProfile(target.id).collect {
-                    _activeHistoryList.value = it
-                }
-            }
-            viewModelScope.launch {
-                repository.getBookmarksForProfile(target.id).collect {
-                    _activeBookmarksList.value = it
-                }
-            }
 
             // Restore cookies
             CookieSyncHelper.restoreProfileCookies(target.id, repository)
@@ -193,10 +210,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateActiveProfile(updated: BrowserProfile) {
+        updateProfile(updated)
+    }
+
+    fun updateProfile(updated: BrowserProfile) {
         viewModelScope.launch {
             repository.updateProfile(updated)
-            _activeProfile.value = updated
-            applyProxyOverride(updated)
+            if (_activeProfile.value?.id == updated.id) {
+                _activeProfile.value = updated
+                applyProxyOverride(updated)
+            }
         }
     }
 
@@ -324,7 +347,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun toggleBookmark(title: String, url: String) {
         val active = _activeProfile.value ?: return
         viewModelScope.launch {
-            val current = _activeBookmarksList.value
+            val current = activeBookmarksList.value
             val existing = current.find { it.url == url }
             if (existing != null) {
                 repository.deleteBookmark(existing.id)
